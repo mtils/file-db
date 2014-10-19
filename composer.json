@@ -1,0 +1,20 @@
+{
+  "name": "ems/file-db",
+  "type": "library",
+  "description": "A library to have a synced version of on upload directory inside an database table",
+  "keywords": ["fs", "cms", "files", "urls"],
+  "license": "MIT",
+  "authors": [
+    {
+      "name": "Michael Tils",
+      "email": "mtils@web-utils.de",
+      "homepage": "http://web-utils.de"
+    }
+   ],
+  "autoload": {
+    "psr-0": {
+      "FileDB": "src/"
+    }
+  },
+  "minimum-stability": "dev"
+}
