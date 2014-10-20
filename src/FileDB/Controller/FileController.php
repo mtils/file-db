@@ -2,7 +2,7 @@
 
 use Controller;
 use View;
-use FsDb;
+use FileDB;
 use FileDB\Model\NotInDbException;
 use Illuminate\Database\Eloquent\Collection;
 use RuntimeException;
@@ -26,23 +26,23 @@ class FileController extends Controller{
         $params = $this->getUrlParams(Input::all());
 
         if($dirId){
-            $dir = FsDb::getById($dirId, 1);
+            $dir = FileDB::getById($dirId, 1);
 
             if(Input::get('sync')){
-                FsDb::syncWithFs($dir,1);
+                FileDB::syncWithFs($dir,1);
             }
 
             if($dir->parent_id){
-                $parentDir = FsDb::getById($dir->parent_id);
+                $parentDir = FileDB::getById($dir->parent_id);
             }
         }
         else{
             try{
-                $dir = FsDb::get('/',1);
+                $dir = FileDB::get('/',1);
             }
             catch(NotInDbException $e){
-                FsDb::syncWithFs(FsDb::createFromPath('/'),1);
-                $dir = FsDb::get('/',1);
+                FileDB::syncWithFs(FileDB::createFromPath('/'),1);
+                $dir = FileDB::get('/',1);
             }
         }
 
@@ -58,7 +58,7 @@ class FileController extends Controller{
             }
         }
 
-        $parents = FsDb::getParents($dir);
+        $parents = FileDB::getParents($dir);
         $routeUrl = $this->getRouteUrl();
 
         return View::make($this->template, compact('dir','currentId','parentDir','parents','params','routeUrl'));
@@ -74,7 +74,7 @@ class FileController extends Controller{
             throw new RuntimeException('DirId is no numeric');
         }
 
-        if(!$parentDir = FsDb::getById(Input::get('dirId'))){
+        if(!$parentDir = FileDB::getById(Input::get('dirId'))){
             throw new RuntimeException("Parent Dir with id $dirId not found");
         }
 
@@ -83,7 +83,7 @@ class FileController extends Controller{
         }
 
         if(Input::input('action') == 'newDir'){
-            $dir = FsDb::create();
+            $dir = FileDB::create();
             $dir->mime_type = 'inode/directory';
             $dir->parent_id=Input::get('dirId');
             $dir->setDir($parentDir);
@@ -93,7 +93,7 @@ class FileController extends Controller{
                 throw new RuntimeException('Please assign a name to this directory');
             }
             $dir->name = Input::get('folderName');
-            FsDb::save($dir);
+            FileDB::save($dir);
             if($dir->exists){
                 return Redirect::to(URL::to($this->getRouteUrl(),array('dirId'=>$dir->id)));
             }
@@ -106,7 +106,7 @@ class FileController extends Controller{
             if(!Input::hasFile('uploadedFile')){
                 throw new RuntimeException('Uploaded File not found');
             }
-            if(FsDb::moveIntoFolder(Input::file('uploadedFile'), $parentDir)){
+            if(FileDB::moveIntoFolder(Input::file('uploadedFile'), $parentDir)){
                 return Redirect::to(URL::to($this->getRouteUrl(),array('dirId'=>$parentDir->id)));
             }
         }

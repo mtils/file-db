@@ -4,7 +4,7 @@ use App;
 
 class EloquentFile extends \Eloquent implements FileInterface{
 
-    protected static $adapterFacade = 'fsdb';
+    protected static $adapterFacade = 'filedb.model';
 
     protected static $fsAdapter;
 
