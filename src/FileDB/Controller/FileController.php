@@ -12,9 +12,9 @@ use URL;
 
 class FileController extends Controller{
 
-    protected $layout = 'theme::layouts.popup';
+    protected $layout = 'layouts.popup';
 
-    protected $template = 'theme::filemanager-popup';
+    protected $template = 'filemanager-popup';
 
     protected $defaultLinkClass = 'normal';
 
@@ -111,7 +111,7 @@ class FileController extends Controller{
             }
         }
 
-        return View::make('theme::filemanager',compact('dir','currentId','parentDir'));
+        return View::make('filemanager',compact('dir','currentId','parentDir'));
     }
 
     protected function getUrlParams(array $params){
