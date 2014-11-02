@@ -18,6 +18,12 @@ class FileController extends Controller{
 
     protected $defaultLinkClass = 'normal';
 
+    protected $context = 'inline';
+
+    public static $defaultRouteUrl = 'files';
+
+    protected $routeUrl;
+
     public function getIndex($dirId=NULL){
 
         $parentDir = NULL;
@@ -46,8 +52,6 @@ class FileController extends Controller{
             }
         }
 
-        $currentId = $dir->id;
-
         if($params['type'] == 'image'){
             $children = $dir->children();
             $dir->clearChildren();
@@ -58,10 +62,17 @@ class FileController extends Controller{
             }
         }
 
-        $parents = FileDB::getParents($dir);
-        $routeUrl = $this->getRouteUrl();
+        $viewParams = [
+            'dir' => $dir,
+            'currentId' => $dir->id,
+            'parentDir' => $parentDir,
+            'parents' => FileDB::getParents($dir),
+            'params' => $params,
+            'routeUrl' => $this->getRouteUrl(),
+            'linkClass' => $this->getLinkClass()
+        ];
 
-        return View::make($this->template, compact('dir','currentId','parentDir','parents','params','routeUrl'));
+        return View::make($this->getTemplate(), $viewParams);
     }
 
     public function postIndex(){
@@ -118,29 +129,44 @@ class FileController extends Controller{
 
         $usedParams = array(
             'type' => '',
-            'linkClass' => $this->defaultLinkClass
+            'context' => $this->getContext()
         );
 
         if( isset($params['type']) && $params['type'] ){
             $usedParams['type'] = strip_tags($params['type']);
         }
 
-        if( isset($params['linkClass']) && $params['linkClass'] ){
-            $usedParams['linkClass'] = strip_tags($params['linkClass']);
-        }
-
         return $usedParams;
 
     }
 
-    protected function getRouteUrl(){
-        return 'admin/files';
+    public function getRouteUrl(){
+
+        if(!$this->routeUrl){
+            return static::$defaultRouteUrl;
+        }
+
+        return $this->routeUrl;
+
     }
 
-    protected function getFileOpener(){
-        return function($file){
-            return 'javascript: window.opener.CKEDITOR.tools.callFunction(1, \'' . $file->url . '\'); window.close();';
-        };
+    public function setRouteUrl($url){
+
+        $this->routeUrl = $url;
+        return $this;
+
+    }
+
+    public function getContext(){
+        return $this->context;
+    }
+
+    public function getLinkClass(){
+        return $this->defaultLinkClass;
+    }
+
+    public function getTemplate(){
+        return $this->template;
     }
 
 }
