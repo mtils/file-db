@@ -24,10 +24,13 @@ class FileController extends Controller{
 
     protected $routeUrl;
 
-    public function getIndex($dirId=NULL){
+    public function index($dirId=NULL){
+
+        if($dirId == 'index'){
+            $dirId = NULL;
+        }
 
         $parentDir = NULL;
-
 
         $params = $this->getUrlParams(Input::all());
 
@@ -75,7 +78,7 @@ class FileController extends Controller{
         return View::make($this->getTemplate(), $viewParams);
     }
 
-    public function postIndex(){
+    public function store(){
 
         if(!Input::get('action') || !Input::get('dirId')){
             throw new RuntimeException('I need dirId and action');

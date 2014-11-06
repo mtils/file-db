@@ -32,6 +32,11 @@ return [
     | This is the eloquent model for file objects
     |
     */
-    'model'    => 'FileDB\Model\EloquentFile'
+    'model'    => 'FileDB\Model\EloquentFile',
+
+    'route' => [
+        'prefix'     => 'files',
+        'controller' => 'FileDB\Controller\FileController'
+    ]
 
 ];

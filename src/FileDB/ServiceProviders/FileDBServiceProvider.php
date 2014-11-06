@@ -8,13 +8,21 @@ use URL;
 
 class FileDBServiceProvider extends ServiceProvider{
 
-    protected $defer = true;
+    protected $defer = false;
 
     public function register(){}
 
     public function boot(){
 
         $this->package('ems/file-db', 'ems/file-db', realpath(__DIR__.'/../../'));
+
+        $this->registerFileDb();
+
+        $this->registerRoutes();
+
+    }
+
+    protected function registerFileDb(){
 
         $this->app->singleton('filedb.model', function($app){
 
@@ -35,6 +43,28 @@ class FileDBServiceProvider extends ServiceProvider{
             return $fileDb;
 
         });
+
+    }
+
+    protected function registerRoutes(){
+
+        $routePrefix = $this->app['config']->get('ems/file-db::route.prefix');
+        $controller = $this->app['config']->get('ems/file-db::route.controller');
+
+        $this->app['router']->get("$routePrefix/{id?}", [
+            'as'=> "$routePrefix",
+            'uses' => "$controller@index"
+        ]);
+
+        $this->app['router']->get("$routePrefix/index/{id?}", [
+            'as'=> "$routePrefix-index",
+            'uses' => "$controller@index"
+        ]);
+
+        $this->app['router']->post("$routePrefix/index/{id?}", [
+            'as'=> "$routePrefix-store",
+            'uses' => "$controller@store"
+        ]);
 
     }
 
