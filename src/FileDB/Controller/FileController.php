@@ -4,7 +4,6 @@ use Controller;
 use View;
 use FileDB;
 use FileDB\Model\NotInDbException;
-use Illuminate\Database\Eloquent\Collection;
 use RuntimeException;
 use Input;
 use Redirect;
