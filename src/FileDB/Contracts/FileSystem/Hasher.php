@@ -1,7 +1,7 @@
 <?php namespace FileDB\Contracts\FileSystem;
 
 
-interface Identifier
+interface Hasher
 {
 
     /**
@@ -10,7 +10,7 @@ interface Identifier
      * @param string $path
      * @return string
      **/
-    public function identifyFile($path);
+    public function fileHash($path);
 
     /**
      * Returns a unique id for a directory
@@ -18,6 +18,6 @@ interface Identifier
      * @param string $path
      * @return string
      **/
-    public function identifyDirectory($path);
+    public function directoryHash($path);
 
 }
