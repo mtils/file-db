@@ -14,7 +14,9 @@ class FileDBServiceProvider extends ServiceProvider{
 
     public function boot(){
 
-        $this->package('ems/file-db', 'ems/file-db', realpath(__DIR__.'/../../'));
+        $this->publishes([
+            realpath(__DIR__.'/../../../filedb.php') => config_path('filedb.php')
+        ]);
 
         $this->registerFileDb();
 
@@ -26,8 +28,8 @@ class FileDBServiceProvider extends ServiceProvider{
 
         $this->app->singleton('filedb.model', function($app){
 
-            $url = $this->app['config']->get('ems/file-db::url');
-            $dir = $this->app['config']->get('ems/file-db::dir');
+            $url = $this->app['config']->get('filedb.url');
+            $dir = $this->app['config']->get('filedb.dir');
 
             if(!starts_with($url,'http')){
                $url = $app['url']->to($url);
@@ -35,7 +37,7 @@ class FileDBServiceProvider extends ServiceProvider{
 
             $mapper = UrlMapper::create()->setBasePath($dir)->setBaseUrl($url);
 
-            $model = $this->app['config']->get('ems/file-db::model');
+            $model = $this->app['config']->get('filedb.model');
 
             $fileDb = new EloquentFileDBModel($mapper, new FileIdentifier());
             $fileDb->setFileClassName($model);
@@ -48,8 +50,8 @@ class FileDBServiceProvider extends ServiceProvider{
 
     protected function registerRoutes(){
 
-        $routePrefix = $this->app['config']->get('ems/file-db::route.prefix');
-        $controller = $this->app['config']->get('ems/file-db::route.controller');
+        $routePrefix = $this->app['config']->get('filedb.route.prefix');
+        $controller = $this->app['config']->get('filedb.route.controller');
 
         $this->app['router']->get("$routePrefix/{id?}", [
             'as'=> "$routePrefix",
