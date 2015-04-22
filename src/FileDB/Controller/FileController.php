@@ -1,6 +1,6 @@
 <?php namespace FileDB\Controller;
 
-use Controller;
+use Illuminate\Routing\Controller;
 use View;
 use FileDB;
 use FileDB\Model\NotInDbException;
