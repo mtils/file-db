@@ -6,6 +6,7 @@ use Symfony\Component\HttpFoundation\File\MimeType\MimeTypeGuesser;
 use Symfony\Component\HttpFoundation\File\UploadedFile;
 use ReflectionClass;
 use RuntimeException;
+use Illuminate\Filesystem\Filesystem;
 
 class EloquentFileDBModel implements FileDBModelInterface{
 
@@ -17,9 +18,13 @@ class EloquentFileDBModel implements FileDBModelInterface{
 
     protected $mapper;
 
-    public function __construct(PathMapperInterface $mapper, IdentifierInterface $hasher){
+    protected $files;
+
+    public function __construct(PathMapperInterface $mapper,
+                                IdentifierInterface $hasher, Filesystem $files){
         $this->mapper = $mapper;
         $this->hasher = $hasher;
+        $this->files = $files;
     }
 
     public function setFileClassName($className){
@@ -42,14 +47,17 @@ class EloquentFileDBModel implements FileDBModelInterface{
         return $file;
     }
 
-    protected function fillByPath(FileInterface $file, $path){
-        $absolutePath = $this->mapper->absolutePath($path);
-        $file->setPath($path);
-        $file->setName(basename($absolutePath));
+    protected function fillByPath(FileInterface $file, $path)
+    {
 
-        if(File::isDirectory($absolutePath)){
+        $absolutePath = $this->mapper->absolutePath($path);
+
+        $file->setPath($this->trimPathForDb($path));
+        $file->setName(ltrim(basename($absolutePath),'/'));
+
+        if($this->files->isDirectory($absolutePath)){
             $mimeType = 'inode/directory';
-            $hash = $this->hasher->dirId($path);
+            $hash = $this->hasher->dirId($absolutePath);
         }
         else{
             $mimeType = MimeTypeGuesser::getInstance()->guess($absolutePath);
@@ -85,13 +93,16 @@ class EloquentFileDBModel implements FileDBModelInterface{
         return $dir;
     }
 
-    public function get($path, $depth=0){
+    public function get($path, $depth=0)
+    {
+
         $method = array($this->fileClassName, 'where');
         $where = call_user_func($method,'file_path','=','/');
 
         if(!$result = $where->get()->first()){
             throw new NotInDbException("Path '$path' is not in DB");
         }
+
         if($result->isDir() && $depth > 0 && !$result->isEmpty()){
             $where = call_user_func($method,'parent_id','=',$result->id);
             foreach($where->get() as $file){
@@ -101,133 +112,189 @@ class EloquentFileDBModel implements FileDBModelInterface{
         return $result;
     }
 
-    public function listDir(FileInterface $folder=NULL){
+    public function listDir(FileInterface $folder=NULL)
+    {
         $method = array($this->fileClassName, 'where');
         if(!$folder){
             return $this->get('/');
         }
-        return call_user_func($method, 'parent_id','=',$folder->id);
+        return call_user_func($method, 'parent_id','=',$folder->id)->get();
     }
 
-    public function save(FileInterface $file){
-        if(!$file->exists){
-            if(!$parentDir = $file->getDir()){
-                if(!$file->parent_id){
-                    throw new RuntimeException('No parentId, dont know where to save the folder');
-                }
-                $parentDir = $this->getById($file->parent_id);
-            }
-            if(!$parentDir){
-                throw new RuntimeException('Parent Dir not found');
-            }
-            $path = trim($parentDir->getPath(),'/').'/'.trim($file->getName(),'/');
-            $absPath = $this->mapper->absolutePath($path);
+    public function save(FileInterface $file)
+    {
 
-            if($file->isDir()){
-                if(!File::makeDirectory($absPath)){
-                    throw new RuntimeException('Couldnt create directory in filesystem. (Access Rights?)');
-                }
-                $title = $file->title;
-                $this->fillByPath($file, $path);
-                if($title){
-                    $file->title = $title;
-                }
-                $file->parent_id = $parentDir->id;
-                $file->save();
-            }
-            else{
-                $title = $file->title;
-                $this->fillByPath($file, $path);
-                if($title){
-                    $file->title = $title;
-                }
-                $file->parent_id = $parentDir->id;
-                $file->save();
-            }
+        if($file->exists) {
+            return;
         }
+
+        $parentDir = $this->getParentDirOrFail($file);
+
+        $path = $this->normalizeFilePath($file);
+
+        $absPath = $this->mapper->absolutePath($path);
+
+        if ($file->isDir()) {
+
+            if (!$this->files->makeDirectory($absPath)) {
+                throw new RuntimeException('Couldnt create directory in filesystem. (Access Rights?)');
+            }
+
+            $title = $file->title;
+            $this->fillByPath($file, $path);
+            if($title){
+                $file->title = $title;
+            }
+            $file->parent_id = $parentDir->id;
+            $file->save();
+
+        } else{
+
+            $title = $file->title;
+            $this->fillByPath($file, $path);
+            if($title){
+                $file->title = $title;
+            }
+            $file->parent_id = $parentDir->id;
+            $file->save();
+
+        }
+
+        if ($parentDir->isEmpty()) {
+            $parentDir->is_empty = 0;
+            $parentDir->save();
+        }
+
     }
 
     public function syncWithFs(FileInterface $fileOrFolder, $depth=0){
 
-        if(!$fileOrFolder->getMimeType()){
+        if (!$fileOrFolder->getMimeType()) {
             throw new RuntimeException('Assign a mimeType before syncing');
         }
-//         echo "\nsyncWithFs: $fileOrFolder->file_path $fileOrFolder->mime_type";
+
         $isEmpty = 0;
-        $children = array();
 
-        if($fileOrFolder->isDir()){
-            $files = File::files($fileOrFolder->getFullPath());
-            $dirs = File::directories($fileOrFolder->getFullPath());
-            $children = array_merge($dirs, $files);
-            if(!count($children)){
-                $isEmpty = 1;
-            }
-        }
-        else{
-            if($parentDir = $this->getOrCreateParent($fileOrFolder)){
-                $fileOrFolder->parent_id = $parentDir->id;
-                $fileOrFolder->save();
-                return;
-            }
+        // No Directory
+        if (!$fileOrFolder->isDir()) {
+            $parentDir = $this->getOrCreateParent($fileOrFolder);
+            $fileOrFolder->setDir($parentDir);
+            $this->save($fileOrFolder);
+            return;
         }
 
-        $savedChildren = array();
+        // Until here it is sure that the passed $fileOrFolder is a dir
 
-        if(!$fileOrFolder->exists){
-            if($fileOrFolder->getPath() == '/'){
-                $fileOrFolder->parent_id = NULL;
-                $fileOrFolder->is_empty = $isEmpty;
-                $fileOrFolder->save();
+        $dir = $fileOrFolder;
+
+        $fsChildren = $this->getFilesAndFoldersFromFS($dir);
+
+        if (!count($fsChildren)) {
+            $isEmpty = 1;
+        }
+
+        if (!$dir->exists) {
+            if($dir->getPath() == '/'){
+                $dir->parent_id = NULL;
+                $dir->is_empty = $isEmpty;
+                $dir->save();
             }
             else{
-                if($parentDir = $this->getOrCreateParent($fileOrFolder)){
-                    $fileOrFolder->parent_id = $parentDir->id;
-                    $fileOrFolder->is_empty = $isEmpty;
-                    $fileOrFolder->save();
+                if($parentDir = $this->getOrCreateParent($dir)){
+                    $dir->parent_id = $parentDir->id;
+                    $dir->is_empty = $isEmpty;
+                    $dir->save();
                 }
             }
         }
-        elseif($fileOrFolder->isDir()){
-            $savedResult = array();
-            if(!$savedResult = $fileOrFolder->children()){
-                $savedResult = $this->listDir($fileOrFolder);
-            }
-            foreach($savedResult as $file){
-                $savedChildren[$file->getPath()] = $file;
-            }
+
+        if( $depth < 1 || !$fsChildren){
+            return;
         }
 
-        if( $depth > 0 && $children){
-            foreach($children as $filePath){
+        $savedChildrenByPath = $this->getChildrenByPath($dir);
 
-                $relPath = $this->mapper->relativePath($filePath);
-                $file = $this->createFromPath($relPath);
+        foreach($fsChildren as $filePath){
 
-                if(isset($savedChildren[$relPath])){
-                    if($this->isSame($savedChildren[$relPath], $file)){
-                        continue;
-                    }
+            $relPath = $this->trimPathForDb($this->mapper->relativePath($filePath));
+            $file = $this->createFromPath($relPath);
+
+            // A file with this path exists in db
+            if(isset($savedChildrenByPath[$relPath])) {
+
+                // Its exactly the same (hash)
+                if($this->isSame($savedChildrenByPath[$relPath], $file)){
+                    continue;
                 }
-                $fileOrFolder->addChild($file);
-                $file->setDir($fileOrFolder);
-                $file->parent_id = $fileOrFolder->id;
 
-                $this->syncWithFs($file, $depth-1);
+                // Update original file
+                $this->fillByPath($savedChildrenByPath[$relPath], $relPath);
+                $savedChildrenByPath[$relPath]->save();
+                continue;
+
             }
+
+            $dir->addChild($file);
+            $file->setDir($dir);
+            $file->parent_id = $dir->id;
+
+            $this->syncWithFs($file, $depth-1);
+
         }
+
+        if (!$dir->isEmpty()) {
+            return;
+        }
+
+        $dir->is_empty = 0;
+        $dir->save();
+
     }
 
-    public function getOrCreateParent(FileInterface $fileOrFolder){
+    public function getOrCreateParent(FileInterface $fileOrFolder)
+    {
+
         $parent = $fileOrFolder->getDir();
+
         if($parent && $parent->exists){
             return $parent;
         }
+
         if($fileOrFolder->getPath() == '/'){
             return;
         }
+
+        // TODO Handle situation in which you have to create n parents
         $paths = $this->getParentPaths($fileOrFolder->getPath());
-        var_dump($paths);
+
+    }
+
+    protected function getParentDirOrFail(FileInterface $file)
+    {
+
+        if ($parentDir = $file->getDir()) {
+            return $parentDir;
+        }
+
+        if(!$file->parent_id){
+            throw new RuntimeException('No parent_id of file setted');
+        }
+
+        if (!$parentDir = $this->getById($file->parent_id)) {
+            throw new RuntimeException("Directory with id {$file->parent_id} not found");
+        }
+
+        $file->setDir($parentDir);
+
+        return $parentDir;
+
+    }
+
+    protected function getFilesAndFoldersFromFS(FileInterface $dir)
+    {
+        $files = $this->files->files($dir->getFullPath());
+        $dirs = $this->files->directories($dir->getFullPath());
+        return array_merge($dirs, $files);
     }
 
     protected function getParentPaths($path){
@@ -307,6 +374,43 @@ class EloquentFileDBModel implements FileDBModelInterface{
         $folder->addChild($file);
         $this->save($file);
         return $file;
+    }
+
+    protected function getChildrenByPath(FileInterface $dir)
+    {
+
+        if(!$savedChildren = $dir->children()){
+            $savedChildren = $this->listDir($dir);
+        }
+
+        $childrenByPath = [];
+
+        foreach($savedChildren as $file){
+            $childrenByPath[$this->trimPathForDb($file->getPath())] = $file;
+        }
+
+        return $childrenByPath;
+    }
+
+    protected function createDirectory(FileInterface $file)
+    {
+        
+    }
+
+    protected function normalizePath($path)
+    {
+        return trim($path,'/');
+    }
+
+    protected function normalizeFilePath(FileInterface $file)
+    {
+        $parentDir = $this->getParentDirOrFail($file);
+        return trim($parentDir->getPath(),'/').'/'.trim($file->getName(),'/');
+    }
+
+    protected function trimPathForDb($path)
+    {
+        return '/'.trim($path, '/');
     }
 
     public function isSame(FileInterface $leftFile, FileInterface $rightFile){

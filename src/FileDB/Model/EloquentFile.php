@@ -1,8 +1,9 @@
 <?php namespace FileDB\Model;
 
 use App;
+use Illuminate\Database\Eloquent\Model;
 
-class EloquentFile extends \Eloquent implements FileInterface{
+class EloquentFile extends Model implements FileInterface{
 
     protected static $adapterFacade = 'filedb.model';
 
@@ -13,6 +14,8 @@ class EloquentFile extends \Eloquent implements FileInterface{
     protected $_children = array();
 
     protected $appends = array('url','children');
+
+    protected $table = 'files';
 
     public static function getAdapterFacade(){
         return static::$adapterFacade;
@@ -46,6 +49,15 @@ class EloquentFile extends \Eloquent implements FileInterface{
         return static::getFsAdapter()->isEqual($this, $file);
     }
 
+    public function getTitle()
+    {
+        if ($this->title) {
+            return $this->title;
+        }
+
+        return $this->name;
+    }
+
     public function getName(){
         return $this->name;
     }
@@ -64,12 +76,27 @@ class EloquentFile extends \Eloquent implements FileInterface{
         return $this;
     }
 
+    protected function getUrlPath()
+    {
+        $path = $this->getPath();
+
+        $parts = explode('/', $path);
+
+        $cleanedParts = [];
+
+        foreach($parts as $part) {
+            $cleanedParts[] = rawurlencode($part);
+        }
+
+        return implode('/', $cleanedParts);
+    }
+
     public function getFullPath(){
         return static::getFsAdapter()->getPathMapper()->absolutePath($this->getPath());
     }
 
     public function getUrl(){
-        return static::getFsAdapter()->getPathMapper()->pathToUrl($this->getPath());
+        return static::getFsAdapter()->getPathMapper()->pathToUrl($this->getUrlPath());
     }
 
     public function getUrlAttribute(){

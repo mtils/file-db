@@ -1,19 +1,29 @@
 <?php namespace FileDB\Controller;
 
+use Closure;
 use Illuminate\Routing\Controller;
 use View;
-use FileDB;
+use FileDB\Model\FileDBModelInterface;
 use FileDB\Model\NotInDbException;
 use RuntimeException;
 use Input;
 use Redirect;
 use URL;
+use Response;
+use Session;
+use Symfony\Component\HttpFoundation\File\Exception\FileException;
+use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
+use Symfony\Component\HttpKernel\Exception\BadRequestHttpException;
+use Lang;
+use Signal\Support\Extendable;
 
 class FileController extends Controller{
 
+    use Extendable;
+
     protected $layout = 'layouts.popup';
 
-    protected $template = 'filemanager-popup';
+    protected $template = 'file-db::filemanager-popup';
 
     protected $defaultLinkClass = 'normal';
 
@@ -21,7 +31,18 @@ class FileController extends Controller{
 
     public static $defaultRouteUrl = 'files';
 
+    protected $routePrefix = 'files';
+
     protected $routeUrl;
+
+    protected $fileDB;
+
+    protected $passThruParams;
+
+    public function __construct(FileDBModelInterface $fileDB)
+    {
+        $this->fileDB = $fileDB;
+    }
 
     public function index($dirId=NULL){
 
@@ -31,30 +52,26 @@ class FileController extends Controller{
 
         $parentDir = NULL;
 
-        $params = $this->getUrlParams(Input::all());
+        $params = $this->getPassThruParams();
 
         if($dirId){
-            $dir = FileDB::getById($dirId, 1);
-
-            if(Input::get('sync')){
-                FileDB::syncWithFs($dir,1);
-            }
+            $dir = $this->fileDB->getById($dirId, 1);
 
             if($dir->parent_id){
-                $parentDir = FileDB::getById($dir->parent_id);
+                $parentDir = $this->fileDB->getById($dir->parent_id);
             }
         }
         else{
             try{
-                $dir = FileDB::get('/',1);
+                $dir = $this->fileDB->get('/',1);
             }
             catch(NotInDbException $e){
-                FileDB::syncWithFs(FileDB::createFromPath('/'),1);
-                $dir = FileDB::get('/',1);
+                $this->fileDB->syncWithFs($this->fileDB->createFromPath('/'),1);
+                $dir = $this->fileDB->get('/',1);
             }
         }
 
-        if($params['type'] == 'image'){
+        if( isset($params['type']) && $params['type'] == 'image'){
             $children = $dir->children();
             $dir->clearChildren();
             foreach($children as $child){
@@ -66,109 +83,197 @@ class FileController extends Controller{
 
         $viewParams = [
             'dir' => $dir,
-            'currentId' => $dir->id,
-            'parentDir' => $parentDir,
-            'parents' => FileDB::getParents($dir),
+            'parents' => $this->fileDB->getParents($dir),
             'params' => $params,
-            'routeUrl' => $this->getRouteUrl(),
-            'linkClass' => $this->getLinkClass()
+            'toRoute' => function ($action, $params=[]) {
+                return $this->toRoute($action, $params);
+             },
+            'attributeSetter' => $this->getAttributeProvider($this->getContext())
         ];
 
         return View::make($this->getTemplate(), $viewParams);
     }
 
-    public function store(){
+    public function store($dirId){
 
-        if(!Input::get('action') || !Input::get('dirId')){
-            throw new RuntimeException('I need dirId and action');
+        $parentDir = $this->getDirOrFail($dirId);
+
+        if(!$dirName = Input::get('folderName')){
+            $this->flashMessage('dirname-missing');
+            return $this->redirectTo('index', $dirId);
         }
 
-        if(!is_numeric(Input::get('dirId'))){
-            throw new RuntimeException('DirId is no numeric');
-        }
+        $dir = $this->fileDB->create();
+        $dir->mime_type = 'inode/directory';
+        $dir->parent_id=Input::get('dirId');
+        $dir->setDir($parentDir);
+        $parentDir->addChild($dir);
 
-        if(!$parentDir = FileDB::getById(Input::get('dirId'))){
-            throw new RuntimeException("Parent Dir with id $dirId not found");
-        }
+        $dir->name = $dirName;
+        $this->fileDB->save($dir);
 
-        if(!in_array(Input::get('action'), array('upload','newDir'))){
-            throw new RuntimeException('Unknown action');
-        }
+        return $this->redirectTo('index', [$dir->id]);
 
-        if(Input::input('action') == 'newDir'){
-            $dir = FileDB::create();
-            $dir->mime_type = 'inode/directory';
-            $dir->parent_id=Input::get('dirId');
-            $dir->setDir($parentDir);
-            $parentDir->addChild($dir);
+    }
 
-            if(!$dirName = Input::get('folderName')){
-                throw new RuntimeException('Please assign a name to this directory');
-            }
-            $dir->name = Input::get('folderName');
-            FileDB::save($dir);
-            if($dir->exists){
-                return Redirect::to(URL::to($this->getRouteUrl(),array('dirId'=>$dir->id)));
-            }
-            else{
-                $currentId = Input::get('dirId');
-                $dir = $parentDir;
-            }
-        }
-        elseif(Input::input('action') == 'upload'){
+    public function upload($dirId)
+    {
+        try{
+
+            $parentDir = $this->getDirOrFail($dirId);
+
             if(!Input::hasFile('uploadedFile')){
                 throw new RuntimeException('Uploaded File not found');
             }
-            if(FileDB::moveIntoFolder(Input::file('uploadedFile'), $parentDir)){
-                return Redirect::to(URL::to($this->getRouteUrl(),array('dirId'=>$parentDir->id)));
-            }
+
+            $this->fileDB->moveIntoFolder(Input::file('uploadedFile'), $parentDir);
+
+        } catch(FileException $e) {
+            $this->flashMessage('upload-failed','danger');
+        } catch(RuntimeException $e) {
+            $this->flashMessage('uploaded-file-missing','danger');
         }
 
-        return View::make('filemanager',compact('dir','currentId','parentDir'));
+        return $this->redirectTo('index', $parentDir->id);
     }
 
-    protected function getUrlParams(array $params){
+    public function sync($dirId)
+    {
+        $dir = $this->getDirOrFail($dirId);
+        $this->fileDB->syncWithFs($dir, 1);
+        return $this->redirectTo('index', [$dir->id]);
+    }
 
-        $usedParams = array(
-            'type' => '',
-            'context' => $this->getContext()
-        );
+    public function jsConfig()
+    {
+        $content = 'window.fileroute = "' . $this->toRoute('index') . '";';
+        return Response::make($content)->header('Content-Type', 'application/javascript');
+    }
 
-        if( isset($params['type']) && $params['type'] ){
-            $usedParams['type'] = strip_tags($params['type']);
+    protected function getDirOrFail($id)
+    {
+
+        if(!is_numeric($id)){
+            throw new BadRequestHttpException('DirId is no numeric');
         }
 
-        return $usedParams;
-
+        if($dir = $this->fileDB->getById($id)) {
+            return $dir;
+        }
+        throw new NotFoundHttpException("Dir with id $id not found");
     }
 
-    public function getRouteUrl(){
+    protected function getPassThruParams(){
 
-        if(!$this->routeUrl){
-            return static::$defaultRouteUrl;
+        if ($this->passThruParams !== null) {
+            return $this->passThruParams;
         }
 
-        return $this->routeUrl;
+        $this->passThruParams = [];
+
+        $all = Input::all();
+
+        $filtered = array_except($all, ['sync','uploadedFile','folderName']);
+
+        // Security check
+        if (count($filtered) > 30) {
+            throw new RuntimeException('Too many query params');
+        }
+
+        foreach ($filtered as $key=>$value) {
+            $this->passThruParams[$key] = strip_tags($value);
+        }
+
+        return $this->passThruParams;
 
     }
 
-    public function setRouteUrl($url){
+    public function toRoute($action, $params=[])
+    {
+        $params = (array)$params;
+        $url = URL::route($this->routePrefix . '.' . $action, $params);
 
-        $this->routeUrl = $url;
+        if ($passThruParams = $this->getPassThruParams()) {
+            $url .= '?' . http_build_query($passThruParams);
+        }
+
+        return $url;
+
+    }
+
+    protected function redirectTo($action, $params=[])
+    {
+        return Redirect::to($this->toRoute('index', $params));
+    }
+
+    public function getRoutePrefix()
+    {
+        return $this->routePrefix;
+    }
+
+    public function setRoutePrefix($prefix)
+    {
+        $this->routePrefix = $prefix;
         return $this;
-
     }
 
-    public function getContext(){
-        return $this->context;
-    }
-
-    public function getLinkClass(){
-        return $this->defaultLinkClass;
+    public function getContext()
+    {
+        $params = $this->getPassThruParams();
+        if (isset($params['context'])) {
+            return $params['context'];
+        }
+        return 'inline';
     }
 
     public function getTemplate(){
         return $this->template;
+    }
+
+    public function provideOpenLinkAttributes($context, Closure $closure)
+    {
+        $closure->bindTo($this);
+        $this->extend($this->getContextExtendName($context), $closure);
+        return $this;
+    }
+
+    protected function getAttributeProvider($context)
+    {
+
+        $extendName = $this->getContextExtendName($context);
+
+        if ($this->hasExtend($extendName)) {
+            return $this->getExtend($extendName);
+        }
+
+        return function($file) {
+            return [
+                'href'  =>$file->url,
+                'class'=>'inline',
+                'onclick'=>"window.open($(this).attr('href'), 'imgViewer','width=600,height=400'); return false;"];
+        };
+
+
+    }
+
+    protected function getContextExtendName($context)
+    {
+        return "attribute-setter-$context";
+    }
+
+    protected function message($code)
+    {
+        return Lang::get("file-db::file-db.messages.$code");
+    }
+
+    protected function flashMessage($code, $state='success')
+    {
+        return $this->flash($this->message($code), $state);
+    }
+
+    protected function flash($message, $state='success')
+    {
+        Session::flash('file-db-message', [$message, $state]);
     }
 
 }

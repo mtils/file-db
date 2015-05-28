@@ -8,6 +8,8 @@ use URL;
 
 class FileDBServiceProvider extends ServiceProvider{
 
+    protected $packagePath;
+
     protected $defer = false;
 
     public function register(){}
@@ -15,8 +17,22 @@ class FileDBServiceProvider extends ServiceProvider{
     public function boot(){
 
         $this->publishes([
-            realpath(__DIR__.'/../../../filedb.php') => config_path('filedb.php')
-        ]);
+            $this->packagePath('config/filedb.php') => config_path('filedb.php')
+        ], 'config');
+
+        $this->publishes([
+            $this->packagePath('migrations/') => database_path('/migrations')
+        ], 'migrations');
+
+        $this->loadViewsFrom(
+            $this->packagePath('resources/views'),
+            'file-db'
+        );
+
+        $this->loadTranslationsFrom(
+            $this->packagePath('resources/lang'),
+            'file-db'
+        );
 
         $this->registerFileDb();
 
@@ -26,7 +42,9 @@ class FileDBServiceProvider extends ServiceProvider{
 
     protected function registerFileDb(){
 
-        $this->app->singleton('filedb.model', function($app){
+        $this->app->alias('filedb.model', 'FileDB\Model\FileDBModelInterface');
+
+        $this->app->singleton('filedb.model', function($app) {
 
             $url = $this->app['config']->get('filedb.url');
             $dir = $this->app['config']->get('filedb.dir');
@@ -39,7 +57,10 @@ class FileDBServiceProvider extends ServiceProvider{
 
             $model = $this->app['config']->get('filedb.model');
 
-            $fileDb = new EloquentFileDBModel($mapper, new FileIdentifier());
+            $fileDb = $app->make('FileDB\Model\EloquentFileDBModel',[
+                $mapper, new FileIdentifier
+            ]);
+
             $fileDb->setFileClassName($model);
 
             return $fileDb;
@@ -53,21 +74,51 @@ class FileDBServiceProvider extends ServiceProvider{
         $routePrefix = $this->app['config']->get('filedb.route.prefix');
         $controller = $this->app['config']->get('filedb.route.controller');
 
-        $this->app['router']->get("$routePrefix/{id?}", [
-            'as'=> "$routePrefix",
+        $this->app['router']->get("$routePrefix/js-config", [
+            'as'=> "$routePrefix.js-config",
+            'uses' => "$controller@jsConfig"
+        ]);
+
+        $this->app['router']->get("$routePrefix/{dir?}", [
+            'as'=> "$routePrefix.index",
             'uses' => "$controller@index"
         ]);
 
-        $this->app['router']->get("$routePrefix/index/{id?}", [
-            'as'=> "$routePrefix-index",
-            'uses' => "$controller@index"
-        ]);
-
-        $this->app['router']->post("$routePrefix/index/{id?}", [
-            'as'=> "$routePrefix-store",
+        $this->app['router']->post("$routePrefix/{dir}", [
+            'as'=> "$routePrefix.store",
             'uses' => "$controller@store"
         ]);
 
+        $this->app['router']->post("$routePrefix/{dir}/upload", [
+            'as'=> "$routePrefix.upload",
+            'uses' => "$controller@upload"
+        ]);
+
+        $this->app['router']->get("$routePrefix/{dir}/sync", [
+            'as'=> "$routePrefix.sync",
+            'uses' => "$controller@sync"
+        ]);
+
+
+//         $this->app['router']->get("$routePrefix/index/{id?}", [
+//             'as'=> "$routePrefix-index",
+//             'uses' => "$controller@index"
+//         ]);
+
+    }
+
+    protected function packagePath($dir='')
+    {
+
+        if (!$this->packagePath) {
+            $this->packagePath = realpath(__DIR__.'/../../../');
+        }
+
+        if ($dir) {
+            return $this->packagePath . "/$dir";
+        }
+
+        return $this->packagePath;
     }
 
     public function provides(){
