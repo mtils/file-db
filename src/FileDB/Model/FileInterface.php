@@ -1,6 +1,7 @@
 <?php namespace FileDB\Model;
 
 interface FileInterface{
+    public function getId();
     public function getMimeType();
     public function setMimeType($mimeType);
     public function is(FileInterface $file);

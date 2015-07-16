@@ -14,7 +14,8 @@ class FileDBServiceProvider extends ServiceProvider{
 
     public function register(){}
 
-    public function boot(){
+    public function boot()
+    {
 
         $this->publishes([
             $this->packagePath('config/filedb.php') => config_path('filedb.php')
@@ -36,11 +37,14 @@ class FileDBServiceProvider extends ServiceProvider{
 
         $this->registerFileDb();
 
+        $this->registerDependencyFinder();
+
         $this->registerRoutes();
 
     }
 
-    protected function registerFileDb(){
+    protected function registerFileDb()
+    {
 
         $this->app->alias('filedb.model', 'FileDB\Model\FileDBModelInterface');
 
@@ -69,7 +73,19 @@ class FileDBServiceProvider extends ServiceProvider{
 
     }
 
-    protected function registerRoutes(){
+    protected function registerDependencyFinder()
+    {
+
+        $this->app->alias('filedb.dependencies', 'FileDB\Contracts\FileSystem\DependencyFinder');
+
+        $this->app->singleton('filedb.dependencies', function($app){
+            return new \FileDB\Model\DependencyFinderChain;
+        });
+
+    }
+
+    protected function registerRoutes()
+    {
 
         $routePrefix = $this->app['config']->get('filedb.route.prefix');
         $controller = $this->app['config']->get('filedb.route.controller');
@@ -99,6 +115,16 @@ class FileDBServiceProvider extends ServiceProvider{
             'uses' => "$controller@sync"
         ]);
 
+        $this->app['router']->get("$routePrefix/{dir}/destroy-confirm", [
+            'as'=> "$routePrefix.destroy-confirm",
+            'uses' => "$controller@destroyConfirm"
+        ]);
+
+        $this->app['router']->delete("$routePrefix/{dir}", [
+            'as'=> "$routePrefix.destroy",
+            'uses' => "$controller@destroy"
+        ]);
+
 
 //         $this->app['router']->get("$routePrefix/index/{id?}", [
 //             'as'=> "$routePrefix-index",
@@ -121,7 +147,8 @@ class FileDBServiceProvider extends ServiceProvider{
         return $this->packagePath;
     }
 
-    public function provides(){
+    public function provides()
+    {
         return ['filedb.model'];
     }
 

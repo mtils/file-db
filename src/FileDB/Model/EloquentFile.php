@@ -103,6 +103,11 @@ class EloquentFile extends Model implements FileInterface{
         return $this->getUrl();
     }
 
+    public function getId()
+    {
+        return $this->id;
+    }
+
     public function getDir(){
         return $this->dir;
     }

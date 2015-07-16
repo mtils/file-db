@@ -5,6 +5,7 @@ use Illuminate\Routing\Controller;
 use View;
 use FileDB\Model\FileDBModelInterface;
 use FileDB\Model\NotInDbException;
+use FileDB\Contracts\FileSystem\DependencyFinder;
 use RuntimeException;
 use Input;
 use Redirect;
@@ -25,6 +26,10 @@ class FileController extends Controller{
 
     protected $template = 'file-db::filemanager-popup';
 
+    protected $dependencyTemplate = 'file-db::partials.dependencies';
+
+    protected $destroyConfirmTemplate = 'file-db::files.destroy-confirm';
+
     protected $defaultLinkClass = 'normal';
 
     protected $context = 'inline';
@@ -37,11 +42,15 @@ class FileController extends Controller{
 
     protected $fileDB;
 
+    protected $dependencyFinder;
+
     protected $passThruParams;
 
-    public function __construct(FileDBModelInterface $fileDB)
+    public function __construct(FileDBModelInterface $fileDB,
+                                DependencyFinder $dependencyFinder)
     {
         $this->fileDB = $fileDB;
+        $this->dependencyFinder = $dependencyFinder;
     }
 
     public function index($dirId=NULL){
@@ -142,6 +151,36 @@ class FileController extends Controller{
         $dir = $this->getDirOrFail($dirId);
         $this->fileDB->syncWithFs($dir, 1);
         return $this->redirectTo('index', [$dir->id]);
+    }
+
+    public function destroyConfirm($id)
+    {
+
+        $file = $this->fileDB->getById($id);
+
+        $dependencies = $this->dependencyFinder->find($file);
+
+        $data = [
+            'resources'             => $dependencies,
+            'file'                  => $file,
+            'dependencies_template' => $this->dependencyTemplate
+        ];
+
+        return view($this->destroyConfirmTemplate, $data);
+
+    }
+
+    public function destroy($id)
+    {
+        try {
+            $file = $this->fileDB->getById($id);
+            $this->fileDB->deleteFile($file);
+            return 'File deleted';
+        } catch (\Exception $e) {
+            \Log($e);
+            $this->flashMessage('delete-failed','danger');
+            return 'Error: File not deleted';
+        }
     }
 
     public function jsConfig()

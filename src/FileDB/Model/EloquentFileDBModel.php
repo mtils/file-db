@@ -344,8 +344,27 @@ class EloquentFileDBModel implements FileDBModelInterface{
         return array();
     }
 
-    public function deleteFile(FileInterface $file){
-    
+    public function deleteFile(FileInterface $file)
+    {
+
+        if ($file->isDir() && !$file->isEmpty()) {
+            throw new \BadMethodCallException('Currently only deleting of empty dirs is supported');
+        }
+
+        $absPath = $this->mapper->absolutePath($file->getPath());
+
+        if (!$this->files->delete($absPath)) {
+            throw new \RuntimeException("The local filesystem didnt delete the file ". $absPath);
+        }
+
+        $file->delete();
+
+        if ($parent = $this->getById($file->parent_id)) {
+            $this->syncWithFs($parent);
+        }
+
+        return $this;
+
     }
 
     public function getAttributes(FileInterface $file){

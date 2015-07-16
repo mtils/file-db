@@ -89,7 +89,7 @@
                         <td>{{ $file->updated_at }}</td>
                         <td>
                             <!-- Form::open(array('route' => '', 'method' => 'delete')) -->
-                                <button type="submit" class="btn btn-link btn-mini"><i class="glyphicon glyphicon-trash"></i></button>
+                                <button type="submit" data-delete-confirm="{{ URL::route('files.destroy-confirm', [$file->getId()]) }}" class="btn btn-link btn-mini delete"><i class="glyphicon glyphicon-trash"></i></button>
                             <!-- Form::close() -->
                         </td>
                     </tr>
@@ -98,20 +98,9 @@
             </table>
         @endif
     </div>
-    <div class="modal fade" id="upload" tabindex="-1" role="dialog" aria-labelledby="uploadtitle" aria-hidden="true">
+    <div class="modal fade" id="modal-container" tabindex="-1" role="dialog" aria-labelledby="uploadtitle" aria-hidden="true">
         <div class="modal-dialog">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <button type="button" class="close" data-dismiss="modal" aria-hidden="true">&times;</button>
-                    <h4 class="modal-title" id="uploadtitle">@lang('file-db::file-db.upload-file')</h4>
-                </div>
-                <div class="modal-body">
-                @lang('file-db::file-db.upload-file')
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-default" data-dismiss="modal">@lang('file-db::file-db.close')</button>
-                    <!-- button type="button" class="btn btn-primary">Save changes</button -->
-                </div>
+            <div class="modal-content" id="modal-content">
             </div>
         </div>
     </div> 
