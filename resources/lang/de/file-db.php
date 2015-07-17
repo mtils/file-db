@@ -22,6 +22,7 @@ return [
         'really-delete'                     => 'Wollen Sie die Datei wirklich löschen?',
         'really-delete-dir'                 => 'Wollen Sie das Verzeichnis wirklich löschen?',
         'cannot-delete-nonempty-dir'        => 'Ein Verzeichnis muss leer sein um gelöscht werden zu können',
+        'delete-failed'                     => 'Die Datei/der Ordner konnte nicht gelöscht werden',
     ],
     'file-properties' => [
         'name'          => 'Datei',

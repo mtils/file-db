@@ -14,44 +14,7 @@
             <script src="https://oss.maxcdn.com/libs/respond.js/1.3.0/respond.min.js"></script>
             <![endif]-->
             <style>
-                div.filemanager{
-                    margin-left: 20px;
-                    margin-right: 20px;
-                    padding: 10px;
-                    border-style: solid;
-                    border-width: 1px;
-                    border-color: #ddd;
-                    border-radius: 4px 4px 0 0;
-                    box-shadow: none;
-                }
-
-                .filemanager .breadcrumb{
-                    margin-top: 10px;
-                    margin-bottom: 10px !important;
-                    border: 1px solid #ddd;
-                    border-radius: 4px 4px 0 0;
-                }
-
-                .filemanager .crop{
-                    width: 50px;
-                    height: 40px;
-                    background-position: center center;
-                    background-repeat: no-repeat;
-                    background-size: 80px auto;
-                }
-
-                .filemanager td.thumb{
-                    text-align: center;
-                    width: 60px;
-                }
-
-                .filemanager td{
-                    font-size: 14px;
-                    vertical-align: middle !important;
-                }
-                .filemanager td.thumb i{
-                    font-size: 32px;
-                }
+                @include('file-db::partials.style')
             </style>
         @show
     </head>
@@ -65,33 +28,7 @@
         <!-- Bootstrap -->
         <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.4/js/bootstrap.min.js"></script>
         <script>
-
-            function openModalIframe(url){
-
-                jQuery.ajax({
-                    method: 'GET',
-                    url: url,
-                }).done(function(html){
-                    $('#modal-content').html(html);
-                    $('#modal-container').modal({show:true})
-                });
-            }
-
-            function deleteFile(url){
-
-                jQuery.ajax({
-                    method: 'DELETE',
-                    url: url,
-                }).done(function(html){
-                    location.reload();
-                });
-            }
-
-            jQuery('button.delete').click(function(e){
-                var fileId = jQuery(this).closest('tr').find('a').data('id');
-                var fileRoute = jQuery(this).data('delete-confirm');
-                openModalIframe(fileRoute);
-            });
+            @include('file-db::partials.javascript')
         </script>
         @show
     </body>
