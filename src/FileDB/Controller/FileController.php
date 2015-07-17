@@ -18,7 +18,8 @@ use Symfony\Component\HttpKernel\Exception\BadRequestHttpException;
 use Lang;
 use Signal\Support\Extendable;
 
-class FileController extends Controller{
+class FileController extends Controller
+{
 
     use Extendable;
 
@@ -177,7 +178,7 @@ class FileController extends Controller{
             $this->fileDB->deleteFile($file);
             return 'File deleted';
         } catch (\Exception $e) {
-            \Log($e);
+            \Log::error($e);
             $this->flashMessage('delete-failed','danger');
             return 'Error: File not deleted';
         }
@@ -267,6 +268,12 @@ class FileController extends Controller{
 
     public function getTemplate(){
         return $this->template;
+    }
+
+    public function setTemplate($template)
+    {
+        $this->template = $template;
+        return $this;
     }
 
     public function provideOpenLinkAttributes($context, Closure $closure)

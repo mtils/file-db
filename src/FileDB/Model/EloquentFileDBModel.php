@@ -194,18 +194,22 @@ class EloquentFileDBModel implements FileDBModelInterface{
         }
 
         if (!$dir->exists) {
-            if($dir->getPath() == '/'){
+            if ($dir->getPath() == '/') {
                 $dir->parent_id = NULL;
                 $dir->is_empty = $isEmpty;
                 $dir->save();
-            }
-            else{
-                if($parentDir = $this->getOrCreateParent($dir)){
+            } else {
+                if ($parentDir = $this->getOrCreateParent($dir)) {
                     $dir->parent_id = $parentDir->id;
                     $dir->is_empty = $isEmpty;
                     $dir->save();
                 }
             }
+        }
+
+        if (!$fsChildren && !$dir->isEmpty()) {
+            $dir->is_empty = 1;
+            $dir->save();
         }
 
         if( $depth < 1 || !$fsChildren){
@@ -214,7 +218,7 @@ class EloquentFileDBModel implements FileDBModelInterface{
 
         $savedChildrenByPath = $this->getChildrenByPath($dir);
 
-        foreach($fsChildren as $filePath){
+        foreach ($fsChildren as $filePath) {
 
             $relPath = $this->trimPathForDb($this->mapper->relativePath($filePath));
             $file = $this->createFromPath($relPath);
@@ -353,7 +357,9 @@ class EloquentFileDBModel implements FileDBModelInterface{
 
         $absPath = $this->mapper->absolutePath($file->getPath());
 
-        if (!$this->files->delete($absPath)) {
+        $method = $file->isDir() ? 'deleteDirectory' : 'delete';
+
+        if (!$this->files->{$method}($absPath)) {
             throw new \RuntimeException("The local filesystem didnt delete the file ". $absPath);
         }
 
