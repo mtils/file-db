@@ -54,7 +54,11 @@ class FileDBServiceProvider extends ServiceProvider{
             $dir = $this->app['config']->get('filedb.dir');
 
             if(!starts_with($url,'http')){
-               $url = $app['url']->to($url);
+                try {
+                    $url = $app['url']->to($url);
+                } catch (\OutOfBoundsException $e) {
+                    $url = $app['config']['app.url'] . "$url";
+                }
             }
 
             $mapper = UrlMapper::create()->setBasePath($dir)->setBaseUrl($url);
