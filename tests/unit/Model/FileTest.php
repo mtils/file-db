@@ -4,8 +4,9 @@ use Mockery as m;
 use FileDB\Model\File;
 use FileDB\Model\Directory;
 use FileDB\Model\DummyRepository;
+use PHPUnit\Framework\TestCase;
 
-class FileTest extends PHPUnit_Framework_TestCase{
+class FileTest extends TestCase{
 
     public function testImplementsInterface()
     {
