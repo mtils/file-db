@@ -4,7 +4,7 @@ interface FileInterface{
     public function getId();
     public function getMimeType();
     public function setMimeType($mimeType);
-    public function is(FileInterface $file);
+    public function is($file);
     public function getName();
     public function setName($name);
     public function getPath();

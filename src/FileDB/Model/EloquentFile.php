@@ -45,8 +45,11 @@ class EloquentFile extends Model implements FileInterface{
         return $this;
     }
 
-    public function is(FileInterface $file){
-        return static::getFsAdapter()->isEqual($this, $file);
+    public function is($file){
+        if ($file instanceof FileInterface) {
+            return static::getFsAdapter()->isEqual($this, $file);
+        }
+        return parent::is($file);
     }
 
     public function getTitle()

@@ -15,7 +15,6 @@
         "php": ">=5.4.0",
         "illuminate/database":"5.0.*|5.1.*|5.2.*|5.3.*|5.4.*|5.5.*",
         "illuminate/support":"5.0.*|5.1.*|5.2.*|5.3.*|5.4.*|5.5.*",
-        "ems/signal":"0.2.*",
         "ems/formobject":"0.*"
   },
   "autoload": {

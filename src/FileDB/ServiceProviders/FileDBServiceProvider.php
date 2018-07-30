@@ -66,7 +66,8 @@ class FileDBServiceProvider extends ServiceProvider{
             $model = $this->app['config']->get('filedb.model');
 
             $fileDb = $app->make('FileDB\Model\EloquentFileDBModel',[
-                $mapper, new FileIdentifier
+                'mapper' => $mapper,
+                'hasher' => new FileIdentifier
             ]);
 
             $fileDb->setFileClassName($model);

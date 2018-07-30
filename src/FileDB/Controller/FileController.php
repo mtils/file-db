@@ -16,7 +16,7 @@ use Symfony\Component\HttpFoundation\File\Exception\FileException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Symfony\Component\HttpKernel\Exception\BadRequestHttpException;
 use Lang;
-use Signal\Support\Extendable;
+use Ems\Core\Patterns\Extendable;
 
 class FileController extends Controller
 {
@@ -288,8 +288,8 @@ class FileController extends Controller
 
         $extendName = $this->getContextExtendName($context);
 
-        if ($this->hasExtend($extendName)) {
-            return $this->getExtend($extendName);
+        if ($this->hasExtension($extendName)) {
+            return $this->getExtension($extendName);
         }
 
         return function($file) {
