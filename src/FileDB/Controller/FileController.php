@@ -1,51 +1,97 @@
 <?php namespace FileDB\Controller;
 
 use Closure;
-use Illuminate\Routing\Controller;
-use View;
-use FileDB\Model\FileDBModelInterface;
-use FileDB\Model\NotInDbException;
-use FileDB\Contracts\FileSystem\DependencyFinder;
-use RuntimeException;
-use Input;
-use Redirect;
-use URL;
-use Response;
-use Session;
-use Symfony\Component\HttpFoundation\File\Exception\FileException;
-use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
-use Symfony\Component\HttpKernel\Exception\BadRequestHttpException;
-use Lang;
+use Ems\Core\LocalFilesystem;
 use Ems\Core\Patterns\Extendable;
+use FileDB\Contracts\FileSystem\DependencyFinder;
+use FileDB\Model\EloquentFile;
+use FileDB\Model\FileDBModelInterface;
+use FileDB\Model\FileInterface;
+use FileDB\Model\NotInDbException;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Routing\Controller;
+use Input;
+use Lang;
+use Redirect;
+use Response;
+use RuntimeException;
+use Session;
+use function strnatcasecmp;
+use Symfony\Component\HttpFoundation\File\Exception\FileException;
+use Symfony\Component\HttpKernel\Exception\BadRequestHttpException;
+use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
+use URL;
+use function usort;
+use View;
+use function is_array;
+use function sys_get_temp_dir;
 
 class FileController extends Controller
 {
 
     use Extendable;
 
+    /**
+     * @var string
+     */
     protected $layout = 'layouts.popup';
 
+    /**
+     * @var string
+     */
     protected $template = 'file-db::filemanager-popup';
 
+    /**
+     * @var string
+     */
     protected $dependencyTemplate = 'file-db::partials.dependencies';
 
+    /**
+     * @var string
+     */
     protected $destroyConfirmTemplate = 'file-db::files.destroy-confirm';
 
+    /**
+     * @var string
+     */
     protected $defaultLinkClass = 'normal';
 
+    /**
+     * @var string
+     */
     protected $context = 'inline';
 
+    /**
+     * @var string
+     */
     public static $defaultRouteUrl = 'files';
 
+    /**
+     * @var string
+     */
     protected $routePrefix = 'files';
 
-    protected $routeUrl;
-
+    /**
+     * @var FileDBModelInterface
+     */
     protected $fileDB;
 
+    /**
+     * @var DependencyFinder
+     */
     protected $dependencyFinder;
 
+    /**
+     * @var array
+     */
     protected $passThruParams;
+
+    /**
+     * @var string
+     */
+    protected $tempDir;
 
     public function __construct(FileDBModelInterface $fileDB,
                                 DependencyFinder $dependencyFinder)
@@ -54,9 +100,18 @@ class FileController extends Controller
         $this->dependencyFinder = $dependencyFinder;
     }
 
-    public function index($dirId=NULL){
 
-        if($dirId == 'index'){
+    /**
+     * List a directory or the root directory.
+     *
+     * @param int $dirId (optional)
+     *
+     * @return mixed
+     */
+    public function index($dirId=null)
+    {
+
+        if ($dirId == 'index') {
             $dirId = NULL;
         }
 
@@ -64,32 +119,13 @@ class FileController extends Controller
 
         $params = $this->getPassThruParams();
 
-        if($dirId){
-            $dir = $this->fileDB->getById($dirId, 1);
+        $dir = $this->getDirectory($dirId);
 
-            if($dir->parent_id){
-                $parentDir = $this->fileDB->getById($dir->parent_id);
-            }
-        }
-        else{
-            try{
-                $dir = $this->fileDB->get('/',1);
-            }
-            catch(NotInDbException $e){
-                $this->fileDB->syncWithFs($this->fileDB->createFromPath('/'),1);
-                $dir = $this->fileDB->get('/',1);
-            }
+        if ( isset($params['type']) && $params['type'] == 'image') {
+            $this->filterToImages($dir);
         }
 
-        if( isset($params['type']) && $params['type'] == 'image'){
-            $children = $dir->children();
-            $dir->clearChildren();
-            foreach($children as $child){
-                if($child->getMimeType() == 'inode/directory' || starts_with($child->getMimeType(),'image')){
-                    $dir->addChild($child);
-                }
-            }
-        }
+        $this->sortChildren($dir);
 
         $viewParams = [
             'dir' => $dir,
@@ -104,39 +140,67 @@ class FileController extends Controller
         return View::make($this->getTemplate(), $viewParams);
     }
 
-    public function store($dirId){
+    /**
+     * Create a directory.
+     *
+     * @param int $dirId
+     *
+     * @return mixed
+     */
+    public function store($dirId)
+    {
 
         $parentDir = $this->getDirOrFail($dirId);
 
-        if(!$dirName = Input::get('folderName')){
+        if (!$dirName = Input::get('folderName')) {
             $this->flashMessage('dirname-missing');
             return $this->redirectTo('index', $dirId);
         }
 
         $dir = $this->fileDB->create();
-        $dir->mime_type = 'inode/directory';
-        $dir->parent_id=Input::get('dirId');
-        $dir->setDir($parentDir);
-        $parentDir->addChild($dir);
+        $dir->setMimeType('inode/directory');
 
-        $dir->name = $dirName;
+        $dir->setDir($parentDir);
+        $dir->setName($dirName);
         $this->fileDB->save($dir);
 
-        return $this->redirectTo('index', [$dir->id]);
+        return $this->redirectTo('index', [$dir->getId()]);
 
     }
 
-    public function upload($dirId)
+    /**
+     * Upload a file into the file db.
+     *
+     * @param Request $request
+     * @param int     $dirId
+     *
+     * @return RedirectResponse
+     */
+    public function upload(Request $request, $dirId)
     {
-        try{
 
-            $parentDir = $this->getDirOrFail($dirId);
+        try {
 
-            if(!Input::hasFile('uploadedFile')){
+            $folder = $this->getDirOrFail($dirId);
+
+            if (!$request->hasFile('uploadedFile')) {
                 throw new RuntimeException('Uploaded File not found');
             }
 
-            $this->fileDB->moveIntoFolder(Input::file('uploadedFile'), $parentDir);
+            $uploadedFile = $request->file('uploadedFile');
+
+            /** @var UploadedFile $uploadedFile */
+            $uploadedFile = is_array($uploadedFile) ? $uploadedFile[0] : $uploadedFile;
+
+            $fileName = $uploadedFile->getClientOriginalName();
+
+            $newPath = $this->getTempDir() . '/' . $fileName;
+
+            $uploadedFile->move($this->getTempDir(), $fileName);
+
+            $this->fileDB->importFile($newPath, $folder);
+
+            return $this->redirectTo('index', $folder->getId());
 
         } catch(FileException $e) {
             $this->flashMessage('upload-failed','danger');
@@ -144,16 +208,31 @@ class FileController extends Controller
             $this->flashMessage('uploaded-file-missing','danger');
         }
 
-        return $this->redirectTo('index', $parentDir->id);
+        return $this->redirectTo('index');
+
     }
 
+    /**
+     * Synchronize the filesystem into the db in this folder.
+     *
+     * @param int $dirId
+     *
+     * @return RedirectResponse
+     */
     public function sync($dirId)
     {
         $dir = $this->getDirOrFail($dirId);
         $this->fileDB->syncWithFs($dir, 1);
-        return $this->redirectTo('index', [$dir->id]);
+        return $this->redirectTo('index', [$dir->getId()]);
     }
 
+    /**
+     * Show a (modal) confirmation dialog to delete a file.
+     *
+     * @param int $id
+     *
+     * @return \Illuminate\Contracts\View\Factory|\Illuminate\View\View
+     */
     public function destroyConfirm($id)
     {
 
@@ -171,6 +250,13 @@ class FileController extends Controller
 
     }
 
+    /**
+     * Delete a file. (Just the answer to an ajax DELETE request)
+     *
+     * @param int $id
+     *
+     * @return string
+     */
     public function destroy($id)
     {
         try {
@@ -184,26 +270,146 @@ class FileController extends Controller
         }
     }
 
+    /**
+     * @return \Illuminate\Http\Response
+     */
     public function jsConfig()
     {
         $content = 'window.fileroute = "' . $this->toRoute('index') . '";';
         return Response::make($content)->header('Content-Type', 'application/javascript');
     }
 
-    protected function getDirOrFail($id)
+    /**
+     * Return the temp directory where uploaded files are stored.
+     *
+     * @return string
+     */
+    public function getTempDir()
     {
-
-        if(!is_numeric($id)){
-            throw new BadRequestHttpException('DirId is no numeric');
+        if (!$this->tempDir) {
+            $this->tempDir = sys_get_temp_dir();
         }
-
-        if($dir = $this->fileDB->getById($id)) {
-            return $dir;
-        }
-        throw new NotFoundHttpException("Dir with id $id not found");
+        return $this->tempDir;
     }
 
-    protected function getPassThruParams(){
+    /**
+     * Set the temp directory for moving local files into file db.
+     *
+     * @param string $dir
+     *
+     * @return self
+     */
+    public function setTempDir($dir)
+    {
+        $this->tempDir = $dir;
+        return $this;
+    }
+
+    /**
+     * @param string $action
+     * @param array $params
+     *
+     * @return string
+     */
+    public function toRoute($action, $params=[])
+    {
+        $params = (array)$params;
+        $url = URL::route($this->routePrefix . '.' . $action, $params);
+
+        if ($passThruParams = $this->getPassThruParams()) {
+            $url .= '?' . http_build_query($passThruParams);
+        }
+
+        return $url;
+
+    }
+
+    /**
+     * Return the prefix for route names. (Default is files)
+     * The URLs are generated with e.g. URL::route('files.index'). So if you
+     * already have files routes or so overwrite it here.
+     *
+     * @return string
+     */
+    public function getRoutePrefix()
+    {
+        return $this->routePrefix;
+    }
+
+    /**
+     * @see self::getRoutePrefix()
+     *
+     * @param string $prefix
+     *
+     * @return $this
+     */
+    public function setRoutePrefix($prefix)
+    {
+        $this->routePrefix = $prefix;
+        return $this;
+    }
+
+    /**
+     * Return the context of the file manager when it is displayed. A context
+     * stands for "filemanager-for-tiny-mce" or stuff like that.
+     *
+     * @return string
+     */
+    public function getContext()
+    {
+        $params = $this->getPassThruParams();
+        if (isset($params['context'])) {
+            return $params['context'];
+        }
+        return 'inline';
+    }
+
+    /**
+     * Return the name of the index template.
+     *
+     * @return string
+     */
+    public function getTemplate()
+    {
+        return $this->template;
+    }
+
+    /**
+     * Change the name of the index template.
+     *
+     * @param string $template
+     *
+     * @return $this
+     */
+    public function setTemplate($template)
+    {
+        $this->template = $template;
+        return $this;
+    }
+
+    /**
+     * Assign a callable to manipulate the attributes for the "open" links to
+     * open files.
+     *
+     * @param string $context
+     * @param Closure $closure
+     *
+     * @return $this
+     */
+    public function provideOpenLinkAttributes($context, Closure $closure)
+    {
+        $closure->bindTo($this);
+        $this->extend($this->getContextExtendName($context), $closure);
+        return $this;
+    }
+
+    /**
+     * Get some parameters that should be added to every link.
+     *
+     * @return array
+     */
+    protected function getPassThruParams()
+    {
 
         if ($this->passThruParams !== null) {
             return $this->passThruParams;
@@ -228,61 +434,46 @@ class FileController extends Controller
 
     }
 
-    public function toRoute($action, $params=[])
-    {
-        $params = (array)$params;
-        $url = URL::route($this->routePrefix . '.' . $action, $params);
-
-        if ($passThruParams = $this->getPassThruParams()) {
-            $url .= '?' . http_build_query($passThruParams);
-        }
-
-        return $url;
-
-    }
-
+    /**
+     * Generate a redirect.
+     *
+     * @param string $action
+     * @param array $params
+     *
+     * @return RedirectResponse
+     */
     protected function redirectTo($action, $params=[])
     {
         return Redirect::to($this->toRoute('index', $params));
     }
 
-    public function getRoutePrefix()
+    /**
+     * @param int $id
+     *
+     * @return FileInterface
+     */
+    protected function getDirOrFail($id)
     {
-        return $this->routePrefix;
-    }
 
-    public function setRoutePrefix($prefix)
-    {
-        $this->routePrefix = $prefix;
-        return $this;
-    }
-
-    public function getContext()
-    {
-        $params = $this->getPassThruParams();
-        if (isset($params['context'])) {
-            return $params['context'];
+        if(!is_numeric($id)){
+            throw new BadRequestHttpException('DirId is no numeric');
         }
-        return 'inline';
+
+        if($dir = $this->fileDB->getById($id)) {
+            return $dir;
+        }
+        throw new NotFoundHttpException("Dir with id $id not found");
     }
 
-    public function getTemplate(){
-        return $this->template;
-    }
-
-    public function setTemplate($template)
-    {
-        $this->template = $template;
-        return $this;
-    }
-
-    public function provideOpenLinkAttributes($context, Closure $closure)
-    {
-        $closure->bindTo($this);
-        $this->extend($this->getContextExtendName($context), $closure);
-        return $this;
-    }
-
+    /**
+     * Return the attribute provider to provide attributes for the open links.
+     *
+     * @see self::provideOpenLinkAttributes()
+     *
+     * @param string $context
+     *
+     * @return callable
+     */
     protected function getAttributeProvider($context)
     {
 
@@ -299,27 +490,124 @@ class FileController extends Controller
                 'onclick'=>"window.open($(this).attr('href'), 'imgViewer','width=600,height=400'); return false;"];
         };
 
-
     }
 
+    /**
+     * Generate a name for extension. Add minus to prevent direct calls by the
+     * extendable trait.
+     *
+     * @param string $context
+     *
+     * @return string
+     */
     protected function getContextExtendName($context)
     {
         return "attribute-setter-$context";
     }
 
+    /**
+     * Return a translation.
+     *
+     * @param string $code
+     *
+     * @return string
+     */
     protected function message($code)
     {
         return Lang::get("file-db::file-db.messages.$code");
     }
 
+    /**
+     * @param string $code
+     *
+     * @param string $state
+     */
     protected function flashMessage($code, $state='success')
     {
-        return $this->flash($this->message($code), $state);
+        $this->flash($this->message($code), $state);
     }
 
+    /**
+     * @param string $message
+     * @param string $state
+     */
     protected function flash($message, $state='success')
     {
         Session::flash('file-db-message', [$message, $state]);
     }
 
+    /**
+     * @param null $id
+     *
+     * @return \FileDB\Model\FileInterface
+     */
+    protected function getDirectory($id=null)
+    {
+        if($id) {
+            return $this->fileDB->getById($id,1);
+        }
+
+        try{
+            return $this->fileDB->get('/',1);
+        } catch(NotInDbException $e) {
+            $this->fileDB->syncWithFs('/', 1);
+            return $this->fileDB->get('/',1);
+        }
+    }
+
+    /**
+     * @param FileInterface $dir
+     */
+    protected function filterToImages(FileInterface $dir)
+    {
+        $children = clone $dir->children();
+
+        $dir->clearChildren();
+
+        foreach ($children as $child) {
+            if ($child->getMimeType() == LocalFilesystem::$directoryMimetype || starts_with($child->getMimeType(),
+                    'image')) {
+                $dir->addChild($child);
+            }
+        }
+    }
+
+    /**
+     * @param FileInterface $dir
+     */
+    protected function sortChildren(FileInterface $dir)
+    {
+        $children = clone $dir->children();
+
+        $dir->clearChildren();
+
+        $directories = [];
+        $files = [];
+
+        foreach ($children as $child) {
+            if ($child->isDir()) {
+                $directories[] = $child;
+                continue;
+            }
+            $files[] = $child;
+        }
+
+        $this->sortEntries($directories);
+        $this->sortEntries($files);
+
+        foreach ($directories as $subDir) {
+            $dir->addChild($subDir);
+        }
+
+        foreach ($files as $file) {
+            $dir->addChild($file);
+        }
+    }
+
+    protected function sortEntries(array &$entries)
+    {
+        usort($entries, function (EloquentFile $fileA, EloquentFile $fileB) {
+            return strnatcasecmp($fileA->getTitle(), $fileB->getTitle());
+        });
+    }
 }

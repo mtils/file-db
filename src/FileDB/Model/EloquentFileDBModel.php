@@ -1,13 +1,20 @@
 <?php namespace FileDB\Model;
 
 use App;
-use File;
+use Ems\Contracts\Core\Filesystem;
+use Ems\Core\Url;
+use RuntimeException;
 use Symfony\Component\HttpFoundation\File\MimeType\MimeTypeGuesser;
 use Symfony\Component\HttpFoundation\File\UploadedFile;
-use ReflectionClass;
-use RuntimeException;
-use Illuminate\Filesystem\Filesystem;
 
+
+/**
+ * Class EloquentFileDBModel
+ *
+ * @deprecated  Use EmsFileDBModel
+ *
+ * @package FileDB\Model
+ */
 class EloquentFileDBModel implements FileDBModelInterface{
 
     protected $fileClassName = '\FileDB\Model\EloquentFile';
@@ -18,6 +25,9 @@ class EloquentFileDBModel implements FileDBModelInterface{
 
     protected $mapper;
 
+    /**
+     * @var Filesystem
+     */
     protected $files;
 
     public function __construct(PathMapperInterface $mapper,
@@ -27,21 +37,25 @@ class EloquentFileDBModel implements FileDBModelInterface{
         $this->files = $files;
     }
 
-    public function setFileClassName($className){
+    public function setFileClassName($className)
+    {
         $this->fileClassName = $className;
         return $this;
     }
 
-    public function create(){
-        $refl = new ReflectionClass($this->fileClassName);
-        return $refl->newInstance();
+    public function create()
+    {
+        $class = $this->fileClassName;
+        return new $class;
     }
 
-    public function getPathMapper(){
+    public function getPathMapper()
+    {
         return $this->mapper;
     }
 
-    public function createFromPath($path){
+    public function createFromPath($path)
+    {
         $file = $this->create();
         $this->fillByPath($file, $path);
         return $file;
@@ -55,7 +69,7 @@ class EloquentFileDBModel implements FileDBModelInterface{
         $file->setPath($this->trimPathForDb($path));
         $file->setName(ltrim(basename($absolutePath),'/'));
 
-        if($this->files->isDirectory($absolutePath)){
+        if($this->isDirectory($absolutePath)){
             $mimeType = 'inode/directory';
             $hash = $this->hasher->dirId($absolutePath);
         }
@@ -64,7 +78,7 @@ class EloquentFileDBModel implements FileDBModelInterface{
             $hash = $this->hasher->fileId($absolutePath);
         }
         $file->setMimeType($mimeType);
-        $file->hash = $hash;
+        $file->hash = $hash; // !! magic property access
     }
 
     public function getById($id, $depth=0){
@@ -74,7 +88,7 @@ class EloquentFileDBModel implements FileDBModelInterface{
             $where = $where->orWhere('parent_id','=',$id);
         }
         $dir = NULL;
-        $result = $where->get()->all();
+        $result = $where->get()->all(); // !! because of optional depth no normal Repo::getRecursive()
         foreach($result as $file){
             if($file->id == $id){
                 $dir = $file;
@@ -97,8 +111,9 @@ class EloquentFileDBModel implements FileDBModelInterface{
     {
 
         $method = array($this->fileClassName, 'where');
-        $where = call_user_func($method,'file_path','=','/');
+        $where = call_user_func($method,'file_path','=','/'); // !! Repo::getByPath()
 
+        /** @var FileInterface $result */
         if(!$result = $where->get()->first()){
             throw new NotInDbException("Path '$path' is not in DB");
         }
@@ -116,7 +131,7 @@ class EloquentFileDBModel implements FileDBModelInterface{
     {
         $method = array($this->fileClassName, 'where');
         if(!$folder){
-            return $this->get('/');
+            return $this->get('/'); // !! Repo::getByPath($path, $depth=0)
         }
         return call_user_func($method, 'parent_id','=',$folder->id)->get();
     }
@@ -140,13 +155,13 @@ class EloquentFileDBModel implements FileDBModelInterface{
                 throw new RuntimeException('Couldnt create directory in filesystem. (Access Rights?)');
             }
 
-            $title = $file->title;
+            $title = $file->title;  // !! magic property access
             $this->fillByPath($file, $path);
             if($title){
                 $file->title = $title;
             }
             $file->parent_id = $parentDir->id;
-            $file->save();
+            $file->save(); // Repo::save
 
         } else{
 
@@ -167,7 +182,22 @@ class EloquentFileDBModel implements FileDBModelInterface{
 
     }
 
-    public function syncWithFs(FileInterface $fileOrFolder, $depth=0){
+    /**
+     * Synchronize database and filesystem for $fileOrFolder. The wording is very
+     * misleading in this case. The direction is: take the fs and apply the
+     * structure in the database.
+     *
+     * @param FileInterface|string $fileOrFolder
+     * @param int $depth
+     *
+     * @return mixed
+     */
+    public function syncWithFs($fileOrFolder, $depth=0)
+    {
+
+        if (!$fileOrFolder instanceof FileInterface) {
+            $fileOrFolder = $this->createFromPath($fileOrFolder);
+        }
 
         if (!$fileOrFolder->getMimeType()) {
             throw new RuntimeException('Assign a mimeType before syncing');
@@ -193,7 +223,7 @@ class EloquentFileDBModel implements FileDBModelInterface{
             $isEmpty = 1;
         }
 
-        if (!$dir->exists) {
+        if (!$dir->exists) { // !! Eloquent ->exists
             if ($dir->getPath() == '/') {
                 $dir->parent_id = NULL;
                 $dir->is_empty = $isEmpty;
@@ -255,6 +285,7 @@ class EloquentFileDBModel implements FileDBModelInterface{
 
     }
 
+    // !! make this protected
     public function getOrCreateParent(FileInterface $fileOrFolder)
     {
 
@@ -357,10 +388,8 @@ class EloquentFileDBModel implements FileDBModelInterface{
 
         $absPath = $this->mapper->absolutePath($file->getPath());
 
-        $method = $file->isDir() ? 'deleteDirectory' : 'delete';
-
-        if (!$this->files->{$method}($absPath)) {
-            throw new \RuntimeException("The local filesystem didnt delete the file ". $absPath);
+        if (!$this->files->delete($absPath)) {
+            throw new \RuntimeException("The local filesystem didn't delete the file ". $absPath);
         }
 
         $file->delete();
@@ -400,6 +429,42 @@ class EloquentFileDBModel implements FileDBModelInterface{
         $this->save($file);
         return $file;
     }
+
+    /**
+     * Import a local file into the FileDB
+     *
+     * @param string $localPath
+     * @param FileInterface $folder (optional)
+     *
+     * @return FileInterface The new file
+     */
+    public function importFile($localPath, FileInterface $folder = null)
+    {
+        if(!$folder->isDir()){
+            throw new RuntimeException('Files can only be moved into directories');
+        }
+        //$fileName = $uploadedFile->getClientOriginalName();
+
+        $fileName = basename($localPath);
+
+        $targetPath = $folder ? $folder->getPath() . "$fileName" : $fileName;
+
+        $this->files->move($localPath, $targetPath);
+
+        $absPath = $this->mapper->absolutePath($targetPath);
+
+        $file = $this->createFromPath($targetPath);
+
+        if ($folder) {
+            $file->setDir($folder);
+            $folder->addChild($file);
+        }
+
+        $this->save($file);
+
+        return $file;
+    }
+
 
     protected function getChildrenByPath(FileInterface $dir)
     {
@@ -448,5 +513,17 @@ class EloquentFileDBModel implements FileDBModelInterface{
 
     public function getBasePath(){
         return $this->basePath;
+    }
+
+    protected function isDirectory($path)
+    {
+        if ($this->files->exists($path)) {
+            return false;
+        }
+
+        $parentDir = (new Url($path))->pop();
+        $directories = $this->files->directories($parentDir);
+
+        return in_array($parentDir, $directories);
     }
 }

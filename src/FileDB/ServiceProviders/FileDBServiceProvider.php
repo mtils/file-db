@@ -1,12 +1,24 @@
 <?php namespace FileDB\ServiceProviders;
 
-use Illuminate\Support\ServiceProvider;
-use FileDB\Model\EloquentFileDBModel;
+use Ems\Contracts\Core\Exceptions\TypeException;
+use Ems\Contracts\Core\Type;
+use Ems\Core\Laravel\IlluminateFilesystem;
+use Ems\Tree\Eloquent\NodeRepository;
+use FileDB\Model\EloquentFile;
+use FileDB\Model\EmsFileDBModel;
+use FileDB\Model\PathMapperInterface;
 use FileDB\Model\UrlMapper;
-use FileDB\Model\FileIdentifier;
-use URL;
+use FileDB\Model\UrlMapperInterface;
+use Illuminate\Contracts\Config\Repository;
+use Illuminate\Contracts\Routing\UrlGenerator;
+use Illuminate\Filesystem\FilesystemAdapter;
+use Illuminate\Support\ServiceProvider;
+use League\Flysystem\Adapter\Local as LocalFSAdapter;
+use League\Flysystem\Filesystem as Flysystem;
 
-class FileDBServiceProvider extends ServiceProvider{
+
+class FileDBServiceProvider extends ServiceProvider
+{
 
     protected $packagePath;
 
@@ -35,6 +47,8 @@ class FileDBServiceProvider extends ServiceProvider{
             'file-db'
         );
 
+        $this->registerUrlMapper();
+
         $this->registerFileDb();
 
         $this->registerDependencyFinder();
@@ -43,38 +57,100 @@ class FileDBServiceProvider extends ServiceProvider{
 
     }
 
-    protected function registerFileDb()
+    protected function registerUrlMapper()
     {
+        $this->app->alias(UrlMapperInterface::class, PathMapperInterface::class);
 
-        $this->app->alias('filedb.model', 'FileDB\Model\FileDBModelInterface');
+        $this->app->singleton(UrlMapperInterface::class, function ($app) {
 
-        $this->app->singleton('filedb.model', function($app) {
+            /** @var Repository $config */
+            $config = $this->app['config'];
 
-            $url = $this->app['config']->get('filedb.url');
-            $dir = $this->app['config']->get('filedb.dir');
+            /** @var UrlGenerator $urls */
+            $urls = $this->app['url'];
 
-            if(!starts_with($url,'http')){
+            $url = $config->get('filedb.url');
+            $dir = $config->get('filedb.dir');
+
+            if (!starts_with($url,'http')) {
                 try {
-                    $url = $app['url']->to($url);
+                    $url = $urls->to($url);
                 } catch (\OutOfBoundsException $e) {
-                    $url = $app['config']['app.url'] . "$url";
+                    $url = $config->get('app.url') . "$url";
                 }
             }
 
-            $mapper = UrlMapper::create()->setBasePath($dir)->setBaseUrl($url);
+            return UrlMapper::create()->setBasePath($dir)->setBaseUrl($url);
 
-            $model = $this->app['config']->get('filedb.model');
+        });
+    }
 
-            $fileDb = $app->make('FileDB\Model\EloquentFileDBModel',[
-                'mapper' => $mapper,
-                'hasher' => new FileIdentifier
+    protected function registerFileDb()
+    {
+
+
+
+        $this->app->alias('filedb.model', 'FileDB\Model\FileDBModelInterface');
+
+        // $this->app->singleton('filedb.model', EmsFileDBModel::class);
+
+        $this->app->singleton('filedb.model', function($app) {
+
+            /** @var Repository $config */
+            $config = $this->app['config'];
+
+            $dir = $config->get('filedb.dir');
+
+            $class = $config->get('filedb.model') ?: EloquentFile::class;
+
+
+            /** @var NodeRepository $nodeRepository */
+            $nodeRepository = $this->app->make(NodeRepository::class, [
+                'model' => new $class
             ]);
 
-            $fileDb->setFileClassName($model);
+            $nodeRepository->setPathKey('file_path')
+                           ->setSegmentKey('name');
+
+            $laravelFsAdapter = $this->createLaravelAdapter(['root' => $dir]);
+
+
+            $fileDb = $this->app->make(EmsFileDBModel::class, [
+                'filesystem'        => new IlluminateFilesystem($laravelFsAdapter),
+                'nodeRepository'    => $nodeRepository
+            ]);
+
+            $this->app->call([$fileDb, 'setUrlMapper']);
 
             return $fileDb;
 
         });
+
+    }
+
+    protected function createLaravelFilesystem()
+    {
+
+    }
+
+    /**
+     * @param array $args
+     *
+     * @return FilesystemAdapter
+     */
+    protected function createLaravelAdapter(array $args=[])
+    {
+        if(!$this->app->bound('filedb.filesystem')) {
+            return new FilesystemAdapter($this->createFlysystem($args));
+        }
+
+        $adapter = $this->app->make('filedb.filesystem');
+
+        if ($adapter instanceof \Illuminate\Contracts\Filesystem\Filesystem) {
+            return $adapter;
+        }
+
+        throw new TypeException("The binding behind filedb.filesystem implement Filesystem interface not " . Type::of($adapter));
 
     }
 
@@ -87,6 +163,35 @@ class FileDBServiceProvider extends ServiceProvider{
             return new \FileDB\Model\DependencyFinderChain;
         });
 
+    }
+
+    /**
+     * @param array $args
+     *
+     * @return Flysystem
+     */
+    protected function createFlysystem(array $args = [])
+    {
+        $flySystem = new Flysystem($this->createFlysystemAdapter($args));
+        $url = isset($args['url']) ? $args['url'] : '/';
+        $flySystem->getConfig()->set('url', $url);
+        return $flySystem;
+    }
+
+    /**
+     * @param array $args
+     *
+     * @return LocalFSAdapter
+     */
+    protected function createFlysystemAdapter(array $args = [])
+    {
+        $root = isset($args['root']) ? $args['root'] : '/';
+
+        if ($this->app->bound('file-db.flysystem')) {
+            return $this->app->make('file-db.flysystem');
+        }
+
+        return new LocalFSAdapter($root);
     }
 
     protected function registerRoutes()

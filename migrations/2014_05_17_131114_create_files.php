@@ -16,7 +16,7 @@ class CreateFiles extends Migration {
 
             $table->engine = 'InnoDB';
             $table->increments('id');
-            $table->string('hash', 40);
+            $table->string('hash', 40)->nullable();
             $table->string('mime_type', 255); // This really long types exist
             $table->string('name', 255);
             $table->string('title', 255)->nullable();
