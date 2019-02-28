@@ -27,6 +27,7 @@ use function usort;
 use View;
 use function is_array;
 use function sys_get_temp_dir;
+use Ems\Contracts\Core\Errors\NotFound;
 
 class FileController extends Controller
 {
@@ -550,6 +551,9 @@ class FileController extends Controller
         try{
             return $this->fileDB->get('/',1);
         } catch(NotInDbException $e) {
+            $this->fileDB->syncWithFs('/', 1);
+            return $this->fileDB->get('/',1);
+        } catch(NotFound $e) {
             $this->fileDB->syncWithFs('/', 1);
             return $this->fileDB->get('/',1);
         }
