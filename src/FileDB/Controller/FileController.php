@@ -8,23 +8,24 @@ use FileDB\Model\EloquentFile;
 use FileDB\Model\FileDBModelInterface;
 use FileDB\Model\FileInterface;
 use FileDB\Model\NotInDbException;
+use Illuminate\Contracts\Routing\ResponseFactory;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Routing\Controller;
+use Illuminate\Contracts\View\Factory as ViewFactory;
 use Input;
 use Lang;
 use Redirect;
-use Response;
 use RuntimeException;
 use Session;
+use function str_starts_with;
 use function strnatcasecmp;
 use Symfony\Component\HttpFoundation\File\Exception\FileException;
 use Symfony\Component\HttpKernel\Exception\BadRequestHttpException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use URL;
 use function usort;
-use View;
 use function is_array;
 use function sys_get_temp_dir;
 use Ems\Contracts\Core\Errors\NotFound;
@@ -105,11 +106,12 @@ class FileController extends Controller
     /**
      * List a directory or the root directory.
      *
-     * @param int $dirId (optional)
+     * @param ViewFactory $viewFactory
+     * @param null $dirId (optional)
      *
      * @return mixed
      */
-    public function index($dirId=null)
+    public function index(ViewFactory $viewFactory, $dirId=null)
     {
 
         if ($dirId == 'index') {
@@ -138,22 +140,23 @@ class FileController extends Controller
             'attributeSetter' => $this->getAttributeProvider($this->getContext())
         ];
 
-        return View::make($this->getTemplate(), $viewParams);
+        return $viewFactory->make($this->getTemplate(), $viewParams);
     }
 
     /**
      * Create a directory.
      *
+     * @param Request $request
      * @param int $dirId
      *
      * @return mixed
      */
-    public function store($dirId)
+    public function store(Request $request, $dirId)
     {
 
         $parentDir = $this->getDirOrFail($dirId);
 
-        if (!$dirName = Input::get('folderName')) {
+        if (!$dirName = $request->get('folderName')) {
             $this->flashMessage('dirname-missing');
             return $this->redirectTo('index', $dirId);
         }
@@ -230,11 +233,12 @@ class FileController extends Controller
     /**
      * Show a (modal) confirmation dialog to delete a file.
      *
+     * @param ViewFactory $viewFactory
      * @param int $id
      *
-     * @return \Illuminate\Contracts\View\Factory|\Illuminate\View\View
+     * @return \Illuminate\Contracts\View\View
      */
-    public function destroyConfirm($id)
+    public function destroyConfirm(ViewFactory $viewFactory, $id)
     {
 
         $file = $this->fileDB->getById($id);
@@ -247,7 +251,7 @@ class FileController extends Controller
             'dependencies_template' => $this->dependencyTemplate
         ];
 
-        return view($this->destroyConfirmTemplate, $data);
+        return $viewFactory->make($this->destroyConfirmTemplate, $data);
 
     }
 
@@ -274,10 +278,10 @@ class FileController extends Controller
     /**
      * @return \Illuminate\Http\Response
      */
-    public function jsConfig()
+    public function jsConfig(ResponseFactory $responseFactory)
     {
         $content = 'window.fileroute = "' . $this->toRoute('index') . '";';
-        return Response::make($content)->header('Content-Type', 'application/javascript');
+        return $responseFactory->make($content)->header('Content-Type', 'application/javascript');
     }
 
     /**
@@ -564,12 +568,15 @@ class FileController extends Controller
      */
     protected function filterToImages(FileInterface $dir)
     {
-        $children = clone $dir->children();
+        $children = [];
+        foreach($dir->children() as $child) {
+            $children[] = $child;
+        }
 
         $dir->clearChildren();
 
         foreach ($children as $child) {
-            if ($child->getMimeType() == LocalFilesystem::$directoryMimetype || starts_with($child->getMimeType(),
+            if ($child->getMimeType() == LocalFilesystem::$directoryMimetype || str_starts_with($child->getMimeType(),
                     'image')) {
                 $dir->addChild($child);
             }
@@ -581,7 +588,10 @@ class FileController extends Controller
      */
     protected function sortChildren(FileInterface $dir)
     {
-        $children = clone $dir->children();
+        $children = [];
+        foreach($dir->children() as $child) {
+            $children[] = $child;
+        }
 
         $dir->clearChildren();
 

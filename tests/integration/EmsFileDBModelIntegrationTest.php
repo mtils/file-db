@@ -3,7 +3,7 @@
  *  * Created by mtils on 14.10.18 at 16:52.
  **/
 
-namespace FileDB\Model;
+namespace FileDB\Test;
 
 use Ems\Contracts\Core\Filesystem;
 use Ems\Core\Laravel\IlluminateFilesystem;
@@ -11,11 +11,16 @@ use Ems\Core\LocalFilesystem;
 use Ems\Testing\Eloquent\MigratedDatabase;
 use Ems\Testing\FilesystemMethods;
 use Ems\Tree\Eloquent\NodeRepository;
+use FileDB\Model\EloquentFile;
+use FileDB\Model\EmsFileDBModel;
+use FileDB\Model\FileDBModelInterface;
+use FileDB\Model\UrlMapper;
 use Illuminate\Filesystem\FilesystemAdapter;
+use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use function realpath;
 use League\Flysystem\Filesystem as Flysystem;
-use League\Flysystem\Adapter\Local as LocalFSAdapter;
+use League\Flysystem\Local\LocalFilesystemAdapter as LocalFSAdapter;
 use Ems\Contracts\Core\Errors\NotFound;
 
 class EmsFileDBModelIntegrationTest extends TestCase
@@ -26,19 +31,13 @@ class EmsFileDBModelIntegrationTest extends TestCase
     protected $shouldPurgeTempFiles = true;
 
 
-    /**
-     * @test
-     */
-    public function implements_interface()
+    #[Test] public function implements_interface()
     {
         $this->assertInstanceOf(FileDBModelInterface::class,
             $this->newFileDb());
     }
 
-    /**
-     * @test
-     */
-    public function syncWithFs_and_get_nodes()
+    #[Test] public function syncWithFs_and_get_nodes()
     {
         $structure = [
             'foo.txt' => '',
@@ -124,10 +123,7 @@ class EmsFileDBModelIntegrationTest extends TestCase
 
     }
 
-    /**
-     * @test
-     */
-    public function syncWithFs_and_listDir()
+    #[Test] public function syncWithFs_and_listDir()
     {
         $structure = [
             'foo.txt' => '',
@@ -197,10 +193,7 @@ class EmsFileDBModelIntegrationTest extends TestCase
 
     }
 
-    /**
-     * @test
-     */
-    public function syncWithFs_excludes_excluded_files()
+    #[Test] public function syncWithFs_excludes_excluded_files()
     {
         $structure = [
             'foo.txt' => '',
@@ -261,10 +254,7 @@ class EmsFileDBModelIntegrationTest extends TestCase
 
     }
 
-    /**
-     * @test
-     */
-    public function syncWithFs_twice_does_not_change_database()
+    #[Test] public function syncWithFs_twice_does_not_change_database()
     {
         $structure = [
             'foo.txt' => '',
@@ -302,10 +292,7 @@ class EmsFileDBModelIntegrationTest extends TestCase
 
     }
 
-    /**
-     * @test
-     */
-    public function importFile_from_outside_into_empty_db()
+    #[Test] public function importFile_from_outside_into_empty_db()
     {
 
         list($tempDir, $dirs) = $this->createNestedDirectories([]);
@@ -337,12 +324,11 @@ class EmsFileDBModelIntegrationTest extends TestCase
 
     }
 
-    /**
-     * @test
-     * @expectedException \Ems\Core\Exceptions\ResourceNotFoundException
-     */
-    public function importFile_with_outside_file_throws_exception()
+    #[Test] public function importFile_with_outside_file_throws_exception()
     {
+        $this->expectException(
+            \Ems\Core\Exceptions\ResourceNotFoundException::class
+        );
 
         list($tempDir, $dirs) = $this->createNestedDirectories([]);
         unset($dirs);
@@ -359,10 +345,7 @@ class EmsFileDBModelIntegrationTest extends TestCase
 
     }
 
-    /**
-     * @test
-     */
-    public function importFile_from_inside_empty_db()
+    #[Test] public function importFile_from_inside_empty_db()
     {
 
         $this->truncate('files');
@@ -395,10 +378,7 @@ class EmsFileDBModelIntegrationTest extends TestCase
 
     }
 
-    /**
-     * @test
-     */
-    public function syncWithFs_and_deleteFile()
+    #[Test] public function syncWithFs_and_deleteFile()
     {
         $structure = [
             'foo.txt' => '',
@@ -440,10 +420,7 @@ class EmsFileDBModelIntegrationTest extends TestCase
 
     }
 
-    /**
-     * @test
-     */
-    public function syncWithFs_with_file_urls()
+    #[Test] public function syncWithFs_with_file_urls()
     {
         $structure = [
             'foo.txt' => '',
@@ -539,20 +516,18 @@ class EmsFileDBModelIntegrationTest extends TestCase
      */
     protected function createLaravelAdapter(array $args=[])
     {
-        return new FilesystemAdapter($this->createFlysystem($args));
+        $adapter = $this->createFlysystemAdapter($args);
+        return new FilesystemAdapter($this->createFlysystem($adapter, $args), $adapter);
     }
 
     /**
+     * @param LocalFSAdapter $adapter
      * @param array $args
-     *
      * @return Flysystem
      */
-    protected function createFlysystem(array $args = [])
+    protected function createFlysystem(LocalFSAdapter $adapter, array $args = [])
     {
-        $flySystem = new Flysystem($this->createFlysystemAdapter($args));
-        $url = isset($args['url']) ? $args['url'] : '/';
-        $flySystem->getConfig()->set('url', $url);
-        return $flySystem;
+        return new Flysystem($adapter, ['url' => $args['url'] ?? '/']);
     }
 
     /**
@@ -562,8 +537,7 @@ class EmsFileDBModelIntegrationTest extends TestCase
      */
     protected function createFlysystemAdapter(array $args = [])
     {
-        $root = isset($args['root']) ? $args['root'] : '/';
-        return new LocalFSAdapter($root);
+        return new LocalFSAdapter($args['root'] ?? '/');
     }
 
 }

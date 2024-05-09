@@ -5,6 +5,7 @@ namespace FileDB\Model;
 
 
 use Collection\CallableSet;
+use FileDB\Contracts\FileSystem\Dependency;
 use FileDB\Model\FileInterface;
 use FileDB\Contracts\FileSystem\DependencyFinder;
 
@@ -28,8 +29,7 @@ class DependencyFinderChain extends CallableSet implements DependencyFinder
      * @param \FileDB\Model\FileInterface $file
      * @param array $filters (optional)
      * @param string $sort id|title|category (default:title)
-     * @return \Traversable of \FileDB\Contracts\FileSystem\Dependency
-     * @see \FileDB\Contracts\FileSystem\Dependency
+     * @return Dependency[]
      **/
     public function find(FileInterface $file, array $filters=[], $sort='title')
     {

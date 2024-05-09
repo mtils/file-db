@@ -4,6 +4,7 @@ use Ems\Contracts\Core\Exceptions\TypeException;
 use Ems\Contracts\Core\Type;
 use Ems\Core\Laravel\IlluminateFilesystem;
 use Ems\Tree\Eloquent\NodeRepository;
+use FileDB\Model\DependencyFinderChain;
 use FileDB\Model\EloquentFile;
 use FileDB\Model\EmsFileDBModel;
 use FileDB\Model\PathMapperInterface;
@@ -13,8 +14,9 @@ use Illuminate\Contracts\Config\Repository;
 use Illuminate\Contracts\Routing\UrlGenerator;
 use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Support\ServiceProvider;
-use League\Flysystem\Adapter\Local as LocalFSAdapter;
+use League\Flysystem\Local\LocalFilesystemAdapter as LocalFSAdapter;
 use League\Flysystem\Filesystem as Flysystem;
+use League\Flysystem\FilesystemAdapter as FlysystemAdapter;
 
 
 class FileDBServiceProvider extends ServiceProvider
@@ -72,7 +74,7 @@ class FileDBServiceProvider extends ServiceProvider
             $url = $config->get('filedb.url');
             $dir = $config->get('filedb.dir');
 
-            if (!starts_with($url,'http')) {
+            if (!str_starts_with($url,'http')) {
                 try {
                     $url = $urls->to($url);
                 } catch (\OutOfBoundsException $e) {
@@ -114,7 +116,6 @@ class FileDBServiceProvider extends ServiceProvider
 
             $laravelFsAdapter = $this->createLaravelAdapter(['root' => $dir]);
 
-
             $fileDb = $this->app->make(EmsFileDBModel::class, [
                 'filesystem'        => new IlluminateFilesystem($laravelFsAdapter),
                 'nodeRepository'    => $nodeRepository
@@ -141,12 +142,13 @@ class FileDBServiceProvider extends ServiceProvider
     protected function createLaravelAdapter(array $args=[])
     {
         if(!$this->app->bound('filedb.filesystem')) {
-            return new FilesystemAdapter($this->createFlysystem($args));
+            $adapter = $this->createFlysystemAdapter($args);
+            return new FilesystemAdapter($this->createFlysystem($adapter, $args), $adapter);
         }
 
         $adapter = $this->app->make('filedb.filesystem');
 
-        if ($adapter instanceof \Illuminate\Contracts\Filesystem\Filesystem) {
+        if ($adapter instanceof FilesystemAdapter) {
             return $adapter;
         }
 
@@ -160,22 +162,20 @@ class FileDBServiceProvider extends ServiceProvider
         $this->app->alias('filedb.dependencies', 'FileDB\Contracts\FileSystem\DependencyFinder');
 
         $this->app->singleton('filedb.dependencies', function($app){
-            return new \FileDB\Model\DependencyFinderChain;
+            return new DependencyFinderChain;
         });
 
     }
 
     /**
+     * @param FlysystemAdapter $adapter
      * @param array $args
      *
      * @return Flysystem
      */
-    protected function createFlysystem(array $args = [])
+    protected function createFlysystem(FlysystemAdapter $adapter, array $args = [])
     {
-        $flySystem = new Flysystem($this->createFlysystemAdapter($args));
-        $url = isset($args['url']) ? $args['url'] : '/';
-        $flySystem->getConfig()->set('url', $url);
-        return $flySystem;
+        return new Flysystem($adapter, ['url' => $args['url'] ?? '/']);
     }
 
     /**
@@ -185,13 +185,10 @@ class FileDBServiceProvider extends ServiceProvider
      */
     protected function createFlysystemAdapter(array $args = [])
     {
-        $root = isset($args['root']) ? $args['root'] : '/';
-
         if ($this->app->bound('file-db.flysystem')) {
             return $this->app->make('file-db.flysystem');
         }
-
-        return new LocalFSAdapter($root);
+        return new LocalFSAdapter($args['root'] ?? '/');
     }
 
     protected function registerRoutes()
