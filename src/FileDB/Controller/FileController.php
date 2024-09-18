@@ -14,6 +14,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Routing\Controller;
 use Illuminate\Contracts\View\Factory as ViewFactory;
+use Illuminate\Support\Arr;
 use Input;
 use Lang;
 use Redirect;
@@ -424,7 +425,7 @@ class FileController extends Controller
 
         $all = Input::all();
 
-        $filtered = array_except($all, ['sync','uploadedFile','folderName']);
+        $filtered = Arr::except($all, ['sync','uploadedFile','folderName']);
 
         // Security check
         if (count($filtered) > 30) {
